@@ -137,7 +137,7 @@ Note: Process memory information requires appropriate permissions. Some system p
 Install via Homebrew:
 
 ```bash
-brew tap maximbilan/ramjet
+brew tap maximbilan/ramjet https://github.com/maximbilan/ramjet
 brew install ramjet
 ```
 
@@ -171,11 +171,8 @@ Then run from anywhere:
 ```bash
 ramjet
 ramjet --watch
+ramjet --top 10
 ```
-
-### Setting Up Homebrew Tap (For Contributors)
-
-See [HOMEBREW.md](HOMEBREW.md) for instructions on creating a Homebrew tap or submitting to homebrew-core.
 
 ## License
 
