@@ -117,8 +117,8 @@ Top 5 Processes by Memory:
 - Queries Mach APIs (`host_statistics64`) for detailed VM statistics
 - Converts page counts to bytes using system page size
 - Calculates used (active + wired), free, and cached (inactive + speculative) memory
-- Uses `task_for_pid` and `task_info` for process memory statistics
-- Uses `memorystatus_get_level` for memory pressure information
+- Uses `proc_pidinfo` with `PROC_PIDTASKINFO` for process memory statistics (no special privileges required)
+- Uses `sysctlbyname("vm.memory_pressure")` for memory pressure information
 
 ## Color Coding
 

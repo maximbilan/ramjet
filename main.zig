@@ -1,3 +1,15 @@
+//! ramjet - A fast, lightweight CLI tool for macOS that reports system-wide RAM usage.
+//!
+//! This tool uses Mach APIs to query memory statistics directly from the kernel,
+//! providing accurate and fast memory information without external dependencies.
+//!
+//! Features:
+//! - Zero heap allocations (stack-only)
+//! - Direct Mach API integration
+//! - Process memory monitoring
+//! - Memory pressure indicators
+//! - Watch mode for continuous monitoring
+
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -87,12 +99,6 @@ extern "c" fn proc_pidinfo(
     buffersize: c_int,
 ) c_int;
 
-// proc_pid_rusage as fallback (may have different access requirements)
-extern "c" fn proc_pid_rusage(
-    pid: c_int,
-    flavor: c_int,
-    buffer: ?*anyopaque,
-) c_int;
 
 // Mach constants
 const HOST_VM_INFO64: c_int = 4;
@@ -125,8 +131,11 @@ extern "c" fn proc_pidpath(
     buffersize: c_uint,
 ) c_int;
 
+// Process listing constants
 const PROC_ALL_PIDS: c_int = 1;
 const MAXPATHLEN: c_uint = 1024;
+const MAX_PROCESS_BUFFER: usize = 2000; // Maximum processes to collect
+const MAX_PROCESS_NAME_WIDTH: usize = 45; // Maximum process name width before truncation
 
 // Error definitions
 const MemoryError = error{
@@ -135,7 +144,6 @@ const MemoryError = error{
     HostStatisticsFailed,
     ProcessListFailed,
     MemoryPressureFailed,
-    ProcPidInfoFailed,
 };
 
 // Process information
@@ -208,8 +216,9 @@ fn getTotalMemory() MemoryError!u64 {
     return memsize;
 }
 
-/// Get swap total using sysctl
-fn getSwapTotal() MemoryError!u64 {
+/// Get swap total using sysctl.
+/// Returns 0 if sysctl fails (will be estimated from swapouts in that case).
+fn getSwapTotal() u64 {
     var size: usize = @sizeOf(u64);
     var swap_total: u64 = 0;
     
@@ -221,9 +230,9 @@ fn getSwapTotal() MemoryError!u64 {
         0,
     );
     
-    // If this fails, we'll calculate from vm_statistics64
+    // If this fails, return 0 - will be estimated from vm_statistics64 swapouts
     if (result != 0) {
-        return 0; // Will be calculated from swapouts
+        return 0;
     }
     
     return swap_total;
@@ -284,7 +293,7 @@ fn getVMStatistics() MemoryError!MemoryStats {
     
     // Swap: estimate from swapouts (pages swapped out)
     const swap_used_bytes = vm_info.swapouts * page_size_u64;
-    const swap_total = getSwapTotal() catch swap_used_bytes;
+    const swap_total = if (getSwapTotal() > 0) getSwapTotal() else swap_used_bytes;
     
     // Used memory = active + wired (memory actively in use)
     const used = active_bytes + wire_bytes;
@@ -318,8 +327,9 @@ fn getVMStatistics() MemoryError!MemoryStats {
     };
 }
 
-/// Get process list and their memory usage
-/// Collects all accessible processes (up to processes.len)
+/// Get process list and their memory usage.
+/// Collects all accessible processes up to the buffer size.
+/// Returns the number of processes successfully collected.
 fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
     // First, get all PIDs
     var pid_buffer: [4096]pid_t = undefined;
@@ -332,7 +342,7 @@ fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
     const actual_pid_count = @as(usize, @intCast(pid_count)) / @sizeOf(pid_t);
     var process_count: usize = 0;
     
-    // Collect ALL accessible processes (don't stop at max_count - we need to sort them all first)
+    // Collect all accessible processes (we need to collect all before sorting)
     for (0..@min(actual_pid_count, pid_buffer.len)) |i| {
         // Stop only if we've filled our buffer
         if (process_count >= processes.len) break;
@@ -340,23 +350,17 @@ fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
         const pid = pid_buffer[i];
         if (pid <= 0) continue;
         
-        // Use proc_pidinfo instead of task_for_pid (doesn't require special privileges)
+        // Use proc_pidinfo to get process memory info (doesn't require special privileges)
         var task_info_data: proc_taskinfo = undefined;
-        var resident_size: u64 = 0;
-        var got_info = false;
-        
         const info_size = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, @ptrCast(&task_info_data), @intCast(@sizeOf(proc_taskinfo)));
         
         // Check if we got valid data - must return exactly the struct size
-        if (info_size == @sizeOf(proc_taskinfo)) {
-            resident_size = task_info_data.pti_resident_size;
-            got_info = true;
-        } else {
-            // Some system processes (like WindowServer) may not be accessible via proc_pidinfo
-            // without special privileges - this is a macOS security limitation
-            // Skip processes we can't access
-            continue;
+        // Some system processes may not be accessible without special privileges
+        if (info_size != @sizeOf(proc_taskinfo)) {
+            continue; // Skip processes we can't access
         }
+        
+        const resident_size = task_info_data.pti_resident_size;
         
         // Get process name
         var path_buffer: [MAXPATHLEN]u8 = undefined;
@@ -565,11 +569,10 @@ fn printBreakdown(stats: MemoryStats, opts: Options) !void {
     try stdout_file.writeAll(line5);
 }
 
-/// Print top processes
+/// Print top processes by memory usage.
+/// Collects all accessible processes, sorts them by memory usage, and displays the top N.
 fn printTopProcesses(count: usize, opts: Options) !void {
-    // Collect more processes than requested so we can sort and pick the top N
-    // Use a larger buffer to ensure we get system processes that appear later in the PID list
-    var processes: [2000]ProcessInfo = undefined;
+    var processes: [MAX_PROCESS_BUFFER]ProcessInfo = undefined;
     const actual_count = try getProcessList(&processes);
     
     if (actual_count == 0) {
@@ -578,7 +581,7 @@ fn printTopProcesses(count: usize, opts: Options) !void {
         return;
     }
     
-    // Sort by resident size (descending) - sort ALL collected processes
+    // Sort by resident size (descending) using selection sort
     for (0..actual_count) |i| {
         var max_idx = i;
         var max_size = processes[i].resident_size;
@@ -614,7 +617,6 @@ fn printTopProcesses(count: usize, opts: Options) !void {
     
     // Find the maximum width of memory strings for alignment
     var max_mem_width: usize = 0;
-    const max_name_width: usize = 45; // Maximum name width before truncation
     for (0..display_count) |i| {
         const proc = processes[i];
         const mem_str = try formatBytes(proc.resident_size, &mem_buf);
@@ -631,18 +633,18 @@ fn printTopProcesses(count: usize, opts: Options) !void {
         var name = proc.name[0..proc.name_len];
         
         // Truncate name if too long
-        if (name.len > max_name_width) {
-            @memcpy(name_padded_buf[0..max_name_width-3], name[0..max_name_width-3]);
-            @memcpy(name_padded_buf[max_name_width-3..max_name_width], "...");
-            name = name_padded_buf[0..max_name_width];
+        if (name.len > MAX_PROCESS_NAME_WIDTH) {
+            @memcpy(name_padded_buf[0..MAX_PROCESS_NAME_WIDTH-3], name[0..MAX_PROCESS_NAME_WIDTH-3]);
+            @memcpy(name_padded_buf[MAX_PROCESS_NAME_WIDTH-3..MAX_PROCESS_NAME_WIDTH], "...");
+            name = name_padded_buf[0..MAX_PROCESS_NAME_WIDTH];
         }
         
         // Pad name to fixed width (left-aligned)
         var name_padded: []const u8 = name;
-        if (name.len < max_name_width) {
+        if (name.len < MAX_PROCESS_NAME_WIDTH) {
             @memcpy(name_padded_buf[0..name.len], name);
-            @memset(name_padded_buf[name.len..max_name_width], ' ');
-            name_padded = name_padded_buf[0..max_name_width];
+            @memset(name_padded_buf[name.len..MAX_PROCESS_NAME_WIDTH], ' ');
+            name_padded = name_padded_buf[0..MAX_PROCESS_NAME_WIDTH];
         }
         
         // Right-align memory value
