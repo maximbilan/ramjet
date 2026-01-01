@@ -9,15 +9,14 @@ class Ramjet < Formula
   desc "Fast, lightweight CLI tool for macOS that reports system-wide RAM usage using Mach APIs"
   homepage "https://github.com/maximbilan/ramjet"
   url "https://github.com/maximbilan/ramjet.git",
-      tag:      "v0.1.0",
-      revision: "HEAD"
+      tag:      "v0.1.0"
   license "MIT"
   head "https://github.com/maximbilan/ramjet.git", branch: "main"
 
   depends_on "zig" => :build
 
   def install
-    system "zig", "build", "-Doptimize=ReleaseFast"
+    system "zig", "build"
     bin.install "zig-out/bin/ramjet"
   end
 
