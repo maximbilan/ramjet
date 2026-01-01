@@ -8,6 +8,12 @@ A fast, lightweight CLI tool for macOS that reports system-wide RAM usage using 
 - **Zero allocations**: Stack-only memory usage
 - **Native**: Direct Mach API integration for accurate statistics
 - **Clean output**: Human-readable memory values (MB/GB)
+- **Watch mode**: Continuous monitoring with configurable interval
+- **Process listing**: Top memory-consuming processes
+- **Detailed breakdown**: Active, wired, inactive, speculative, compressed memory
+- **Color output**: Color-coded by usage level (green/yellow/red)
+- **Swap statistics**: Swap usage information
+- **Memory pressure**: System memory pressure indicator
 
 ## Requirements
 
@@ -25,20 +31,84 @@ The binary will be created at `zig-out/bin/ramjet`.
 ## Running
 
 ```bash
-# Build and run in one command
-zig build run
-
-# Or run the binary directly
+# Basic usage
 ./zig-out/bin/ramjet
+
+# Watch mode (updates every 2 seconds)
+./zig-out/bin/ramjet --watch
+
+# Watch mode with custom interval (5 seconds)
+./zig-out/bin/ramjet --watch 5
+
+# Compact single-line output
+./zig-out/bin/ramjet --compact
+
+# Show top 10 processes by memory
+./zig-out/bin/ramjet --top 10
+
+# Show detailed memory breakdown
+./zig-out/bin/ramjet --breakdown
+
+# Disable colors
+./zig-out/bin/ramjet --no-color
+
+# Combine options
+./zig-out/bin/ramjet --watch 3 --top 5 --breakdown
 ```
 
-## Output Example
+## Command-Line Options
 
+- `-w, --watch [SECONDS]` - Watch mode (update every N seconds, default: 2)
+- `-c, --compact` - Compact single-line output format
+- `--top N` - Show top N processes by memory usage
+- `-b, --breakdown` - Show detailed memory breakdown
+- `--no-color` - Disable colored output
+- `-h, --help` - Show help message
+
+## Output Examples
+
+### Standard Output
 ```
 Total:    24.0 GB
-Used:     11.8 GB (49.3%)
-Free:     539.8 MB
-Cached:   9.4 GB
+Used:     11.8 GB (49.1%)
+Free:     332.7 MB
+Cached:   9.3 GB
+Swap:     0.0 MB / 0.0 MB
+Pressure: Normal
+```
+
+### Compact Output
+```
+24.0G total, 11.8G used (49.1%), 332.7M free, 9.3G cached
+```
+
+### With Breakdown
+```
+Total:    24.0 GB
+Used:     11.8 GB (49.1%)
+Free:     332.7 MB
+Cached:   9.3 GB
+Swap:     0.0 MB / 0.0 MB
+Pressure: Normal
+Memory Breakdown:
+  Active:     9.3 GB
+  Wired:      2.5 GB
+  Inactive:   9.1 GB
+  Speculative: 179.8 MB
+  Compressed: 2.1 GB
+```
+
+### With Top Processes
+```
+Total:    24.0 GB
+Used:     11.8 GB (49.1%)
+...
+Top 5 Processes by Memory:
+    1234  Chrome             2.1 GB
+    5678  Xcode              1.8 GB
+    9012  Slack              512.3 MB
+    3456  Terminal           128.5 MB
+    7890  Finder             64.2 MB
 ```
 
 ## How It Works
@@ -47,6 +117,18 @@ Cached:   9.4 GB
 - Queries Mach APIs (`host_statistics64`) for detailed VM statistics
 - Converts page counts to bytes using system page size
 - Calculates used (active + wired), free, and cached (inactive + speculative) memory
+- Uses `task_for_pid` and `task_info` for process memory statistics
+- Uses `memorystatus_get_level` for memory pressure information
+
+## Color Coding
+
+- **Green**: Memory usage < 50%
+- **Yellow**: Memory usage 50-80%
+- **Red**: Memory usage > 80%
+
+## Process Listing
+
+Note: Process memory information requires appropriate permissions. Some processes may not be accessible without root privileges. The tool will gracefully handle inaccessible processes and show what it can.
 
 ## Installation (Optional)
 
@@ -60,6 +142,7 @@ Then run from anywhere:
 
 ```bash
 ramjet
+ramjet --watch
 ```
 
 ## License
