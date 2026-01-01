@@ -15,7 +15,7 @@ class Ramjet < Formula
   depends_on "zig" => :build
 
   def install
-    system "zig", "build", "-Doptimize=ReleaseFast"
+    system "zig", "build", "--release=fast"
     bin.install "zig-out/bin/ramjet"
   end
 
