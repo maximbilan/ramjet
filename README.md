@@ -134,18 +134,35 @@ Note: Process memory information requires appropriate permissions. Some system p
 
 ### Homebrew (Recommended)
 
-If you have a Homebrew tap set up:
+Install via Homebrew:
 
 ```bash
 brew tap maximbilan/ramjet
 brew install ramjet
 ```
 
-### Manual Installation
-
-To install system-wide:
+Or install in one command:
 
 ```bash
+brew install maximbilan/ramjet/ramjet
+```
+
+After installation, you can use `ramjet` from anywhere:
+
+```bash
+ramjet
+ramjet --watch
+ramjet --top 10
+```
+
+### Manual Installation
+
+Build from source:
+
+```bash
+git clone https://github.com/maximbilan/ramjet.git
+cd ramjet
+zig build
 sudo cp zig-out/bin/ramjet /usr/local/bin/
 ```
 
@@ -156,7 +173,7 @@ ramjet
 ramjet --watch
 ```
 
-### Setting Up Homebrew Tap
+### Setting Up Homebrew Tap (For Contributors)
 
 See [HOMEBREW.md](HOMEBREW.md) for instructions on creating a Homebrew tap or submitting to homebrew-core.
 
