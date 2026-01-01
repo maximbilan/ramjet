@@ -128,7 +128,7 @@ Top 5 Processes by Memory:
 
 ## Process Listing
 
-Note: Process memory information requires appropriate permissions. Some processes may not be accessible without root privileges. The tool will gracefully handle inaccessible processes and show what it can.
+Note: Process memory information requires appropriate permissions. Some system processes (like WindowServer, kernel_task) may not be accessible via `proc_pidinfo` without special privileges due to macOS security restrictions. These processes will not appear in the process list. Activity Monitor can show them because it runs with system entitlements. The tool will gracefully handle inaccessible processes and show all processes it can access.
 
 ## Installation (Optional)
 

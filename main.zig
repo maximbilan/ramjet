@@ -342,11 +342,18 @@ fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
         
         // Use proc_pidinfo instead of task_for_pid (doesn't require special privileges)
         var task_info_data: proc_taskinfo = undefined;
+        var resident_size: u64 = 0;
+        var got_info = false;
+        
         const info_size = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, @ptrCast(&task_info_data), @intCast(@sizeOf(proc_taskinfo)));
         
         // Check if we got valid data - must return exactly the struct size
-        // Some system processes (like WindowServer) may not be accessible without privileges
-        if (info_size != @sizeOf(proc_taskinfo)) {
+        if (info_size == @sizeOf(proc_taskinfo)) {
+            resident_size = task_info_data.pti_resident_size;
+            got_info = true;
+        } else {
+            // Some system processes (like WindowServer) may not be accessible via proc_pidinfo
+            // without special privileges - this is a macOS security limitation
             // Skip processes we can't access
             continue;
         }
@@ -385,7 +392,7 @@ fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
             .pid = pid,
             .name = name,
             .name_len = name_len,
-            .resident_size = task_info_data.pti_resident_size,
+            .resident_size = resident_size,
         };
         process_count += 1;
     }
@@ -534,7 +541,8 @@ fn printBreakdown(stats: MemoryStats, opts: Options) !void {
 /// Print top processes
 fn printTopProcesses(count: usize, opts: Options) !void {
     // Collect more processes than requested so we can sort and pick the top N
-    var processes: [500]ProcessInfo = undefined;
+    // Use a larger buffer to ensure we get system processes that appear later in the PID list
+    var processes: [2000]ProcessInfo = undefined;
     const actual_count = try getProcessList(&processes);
     
     if (actual_count == 0) {
