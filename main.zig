@@ -519,22 +519,49 @@ fn printBreakdown(stats: MemoryStats, opts: Options) !void {
     const reset = if (opts.color) Color.RESET else "";
     const bold = if (opts.color) Color.BOLD else "";
     
+    // Empty line before section
+    try stdout_file.writeAll("\n");
+    
     const header = try std.fmt.bufPrint(&output_buf, "{s}Memory Breakdown:{s}\n", .{ bold, reset });
     try stdout_file.writeAll(header);
     
-    const line1 = try std.fmt.bufPrint(&output_buf, "  Active:     {s}\n", .{active_str});
+    // Find maximum width for alignment
+    const max_width = @max(
+        @max(active_str.len, wired_str.len),
+        @max(@max(inactive_str.len, speculative_str.len), compressed_str.len),
+    );
+    
+    // Helper to pad string to right-align
+    var padded_buf: [64]u8 = undefined;
+    
+    const padAndPrint = struct {
+        fn pad(str: []const u8, width: usize, buf: []u8) []const u8 {
+            if (str.len >= width) return str;
+            const pad_len = width - str.len;
+            @memset(buf[0..pad_len], ' ');
+            @memcpy(buf[pad_len..][0..str.len], str);
+            return buf[0..width];
+        }
+    }.pad;
+    
+    const active_padded = padAndPrint(active_str, max_width, &padded_buf);
+    const line1 = try std.fmt.bufPrint(&output_buf, "  Active:      {s}\n", .{active_padded});
     try stdout_file.writeAll(line1);
     
-    const line2 = try std.fmt.bufPrint(&output_buf, "  Wired:      {s}\n", .{wired_str});
+    const wired_padded = padAndPrint(wired_str, max_width, &padded_buf);
+    const line2 = try std.fmt.bufPrint(&output_buf, "  Wired:       {s}\n", .{wired_padded});
     try stdout_file.writeAll(line2);
     
-    const line3 = try std.fmt.bufPrint(&output_buf, "  Inactive:   {s}\n", .{inactive_str});
+    const inactive_padded = padAndPrint(inactive_str, max_width, &padded_buf);
+    const line3 = try std.fmt.bufPrint(&output_buf, "  Inactive:    {s}\n", .{inactive_padded});
     try stdout_file.writeAll(line3);
     
-    const line4 = try std.fmt.bufPrint(&output_buf, "  Speculative: {s}\n", .{speculative_str});
+    const speculative_padded = padAndPrint(speculative_str, max_width, &padded_buf);
+    const line4 = try std.fmt.bufPrint(&output_buf, "  Speculative: {s}\n", .{speculative_padded});
     try stdout_file.writeAll(line4);
     
-    const line5 = try std.fmt.bufPrint(&output_buf, "  Compressed: {s}\n", .{compressed_str});
+    const compressed_padded = padAndPrint(compressed_str, max_width, &padded_buf);
+    const line5 = try std.fmt.bufPrint(&output_buf, "  Compressed:  {s}\n", .{compressed_padded});
     try stdout_file.writeAll(line5);
 }
 
@@ -579,18 +606,58 @@ fn printTopProcesses(count: usize, opts: Options) !void {
     const bold = if (opts.color) Color.BOLD else "";
     const cyan = if (opts.color) Color.CYAN else "";
     
+    // Empty line before section
+    try stdout_file.writeAll("\n");
+    
     const header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes by Memory:{s}\n", .{ bold, display_count, reset });
     try stdout_file.writeAll(header);
+    
+    // Find the maximum width of memory strings for alignment
+    var max_mem_width: usize = 0;
+    const max_name_width: usize = 45; // Maximum name width before truncation
+    for (0..display_count) |i| {
+        const proc = processes[i];
+        const mem_str = try formatBytes(proc.resident_size, &mem_buf);
+        max_mem_width = @max(max_mem_width, mem_str.len);
+    }
+    
+    // Helper buffers for padding
+    var mem_padded_buf: [64]u8 = undefined;
+    var name_padded_buf: [64]u8 = undefined;
     
     for (0..display_count) |i| {
         const proc = processes[i];
         const mem_str = try formatBytes(proc.resident_size, &mem_buf);
-        const name = proc.name[0..proc.name_len];
+        var name = proc.name[0..proc.name_len];
+        
+        // Truncate name if too long
+        if (name.len > max_name_width) {
+            @memcpy(name_padded_buf[0..max_name_width-3], name[0..max_name_width-3]);
+            @memcpy(name_padded_buf[max_name_width-3..max_name_width], "...");
+            name = name_padded_buf[0..max_name_width];
+        }
+        
+        // Pad name to fixed width (left-aligned)
+        var name_padded: []const u8 = name;
+        if (name.len < max_name_width) {
+            @memcpy(name_padded_buf[0..name.len], name);
+            @memset(name_padded_buf[name.len..max_name_width], ' ');
+            name_padded = name_padded_buf[0..max_name_width];
+        }
+        
+        // Right-align memory value
+        const pad_len = if (mem_str.len < max_mem_width) max_mem_width - mem_str.len else 0;
+        var mem_padded: []const u8 = mem_str;
+        if (pad_len > 0) {
+            @memset(mem_padded_buf[0..pad_len], ' ');
+            @memcpy(mem_padded_buf[pad_len..][0..mem_str.len], mem_str);
+            mem_padded = mem_padded_buf[0..max_mem_width];
+        }
         
         const line = try std.fmt.bufPrint(
             &output_buf,
-            "  {s}{d:>6}{s}  {s}{s:<20}{s}  {s}\n",
-            .{ cyan, proc.pid, reset, cyan, name, reset, mem_str },
+            "  {s}{d:>6}{s}  {s}{s}{s}  {s}{s}\n",
+            .{ cyan, proc.pid, reset, cyan, name_padded, reset, mem_padded, reset },
         );
         try stdout_file.writeAll(line);
     }
