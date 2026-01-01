@@ -121,9 +121,6 @@ extern "c" fn proc_pidpath(
 const PROC_ALL_PIDS: c_int = 1;
 const MAXPATHLEN: c_uint = 1024;
 
-// Memory pressure API
-extern "c" fn memorystatus_get_level(memory_pressure: *c_uint) c_int;
-
 // Error definitions
 const MemoryError = error{
     SysctlFailed,
@@ -226,13 +223,23 @@ fn getSwapTotal() MemoryError!u64 {
     return swap_total;
 }
 
-/// Get memory pressure level
+/// Get memory pressure level using sysctl
 fn getMemoryPressure() MemoryError!c_uint {
+    var size: usize = @sizeOf(c_uint);
     var pressure: c_uint = 0;
-    const result = memorystatus_get_level(&pressure);
+    
+    const result = sysctlbyname(
+        "vm.memory_pressure",
+        @ptrCast(&pressure),
+        &size,
+        null,
+        0,
+    );
+    
     if (result != 0) {
         return error.MemoryPressureFailed;
     }
+    
     return pressure;
 }
 
