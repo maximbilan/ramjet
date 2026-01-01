@@ -130,7 +130,18 @@ Top 5 Processes by Memory:
 
 Note: Process memory information requires appropriate permissions. Some system processes (like WindowServer, kernel_task) may not be accessible via `proc_pidinfo` without special privileges due to macOS security restrictions. These processes will not appear in the process list. Activity Monitor can show them because it runs with system entitlements. The tool will gracefully handle inaccessible processes and show all processes it can access.
 
-## Installation (Optional)
+## Installation
+
+### Homebrew (Recommended)
+
+If you have a Homebrew tap set up:
+
+```bash
+brew tap maximbilan/ramjet
+brew install ramjet
+```
+
+### Manual Installation
 
 To install system-wide:
 
@@ -144,6 +155,10 @@ Then run from anywhere:
 ramjet
 ramjet --watch
 ```
+
+### Setting Up Homebrew Tap
+
+See [HOMEBREW.md](HOMEBREW.md) for instructions on creating a Homebrew tap or submitting to homebrew-core.
 
 ## License
 
