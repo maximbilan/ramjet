@@ -2,21 +2,21 @@
 # frozen_string_literal: true
 
 # This file is a Homebrew formula for ramjet.
-# To install via a tap, run: brew install maximbilan/ramjet/ramjet
 # For more information, see: https://docs.brew.sh/Formula-Cookbook
 
 class Ramjet < Formula
   desc "Fast, lightweight CLI tool for macOS that reports system-wide RAM usage using Mach APIs"
   homepage "https://github.com/maximbilan/ramjet"
   url "https://github.com/maximbilan/ramjet.git",
-      tag:      "v0.1.0"
+      tag:      "v0.1.0",
+      revision: "1ca4a4c333ddf0c20e7b23deb9e03836a6400876"
   license "MIT"
   head "https://github.com/maximbilan/ramjet.git", branch: "main"
 
   depends_on "zig" => :build
 
   def install
-    system "zig", "build"
+    system "zig", "build", "-Doptimize=ReleaseFast"
     bin.install "zig-out/bin/ramjet"
   end
 
