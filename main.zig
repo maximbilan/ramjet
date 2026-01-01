@@ -47,19 +47,27 @@ const vm_statistics64_data_t = extern struct {
     total_uncompressed_pages_in_compressor: u64,
 };
 
-// Task info structure for process memory
-const task_basic_info_64_data_t = extern struct {
-    suspend_count: natural_t,
-    virtual_size: u64,
-    resident_size: u64,
-    user_time: time_value_t,
-    system_time: time_value_t,
-    policy: c_int,
-};
-
-const time_value_t = extern struct {
-    seconds: c_int,
-    microseconds: c_int,
+// Task info structure for process memory (using proc_pidinfo)
+// Must match sys/proc_info.h exactly
+const proc_taskinfo = extern struct {
+    pti_virtual_size: u64,
+    pti_resident_size: u64,
+    pti_total_user: u64,
+    pti_total_system: u64,
+    pti_threads_user: u64,
+    pti_threads_system: u64,
+    pti_policy: i32,
+    pti_faults: i32,
+    pti_pageins: i32,
+    pti_cow_faults: i32,
+    pti_messages_sent: i32,
+    pti_messages_received: i32,
+    pti_syscalls_mach: i32,
+    pti_syscalls_unix: i32,
+    pti_csw: i32,
+    pti_threadnum: i32,
+    pti_numrunning: i32,
+    pti_priority: i32,
 };
 
 // Mach API function declarations
@@ -70,27 +78,26 @@ extern "c" fn host_statistics64(
     host_info_out: *vm_statistics64_data_t,
     host_info_outCnt: *mach_msg_type_number_t,
 ) kern_return_t;
-extern "c" fn task_for_pid(
-    target_tport: mach_port_t,
+// proc_pidinfo function (doesn't require special privileges)
+extern "c" fn proc_pidinfo(
     pid: c_int,
-    task: *task_t,
-) kern_return_t;
-extern "c" fn task_info(
-    target_task: task_t,
     flavor: c_int,
-    task_info_out: *task_basic_info_64_data_t,
-    task_info_outCnt: *mach_msg_type_number_t,
-) kern_return_t;
-extern "c" fn mach_port_deallocate(
-    ipc_space: mach_port_t,
-    name: mach_port_t,
-) kern_return_t;
+    arg: u64,
+    buffer: ?*anyopaque,
+    buffersize: c_int,
+) c_int;
+
+// proc_pid_rusage as fallback (may have different access requirements)
+extern "c" fn proc_pid_rusage(
+    pid: c_int,
+    flavor: c_int,
+    buffer: ?*anyopaque,
+) c_int;
 
 // Mach constants
 const HOST_VM_INFO64: c_int = 4;
 const HOST_VM_INFO64_COUNT: mach_msg_type_number_t = @sizeOf(vm_statistics64_data_t) / @sizeOf(natural_t);
-const TASK_BASIC_INFO_64: c_int = 5;
-const TASK_BASIC_INFO_64_COUNT: mach_msg_type_number_t = @sizeOf(task_basic_info_64_data_t) / @sizeOf(natural_t);
+const PROC_PIDTASKINFO: c_int = 4;
 const KERN_SUCCESS: kern_return_t = 0;
 
 // System call for sysctl
@@ -126,10 +133,9 @@ const MemoryError = error{
     SysctlFailed,
     MachHostSelfFailed,
     HostStatisticsFailed,
-    TaskForPidFailed,
-    TaskInfoFailed,
     ProcessListFailed,
     MemoryPressureFailed,
+    ProcPidInfoFailed,
 };
 
 // Process information
@@ -313,7 +319,8 @@ fn getVMStatistics() MemoryError!MemoryStats {
 }
 
 /// Get process list and their memory usage
-fn getProcessList(max_count: usize, processes: []ProcessInfo) MemoryError!usize {
+/// Collects all accessible processes (up to processes.len)
+fn getProcessList(processes: []ProcessInfo) MemoryError!usize {
     // First, get all PIDs
     var pid_buffer: [4096]pid_t = undefined;
     const pid_count = proc_listpids(PROC_ALL_PIDS, 0, @ptrCast(&pid_buffer), @intCast(pid_buffer.len * @sizeOf(pid_t)));
@@ -325,28 +332,22 @@ fn getProcessList(max_count: usize, processes: []ProcessInfo) MemoryError!usize 
     const actual_pid_count = @as(usize, @intCast(pid_count)) / @sizeOf(pid_t);
     var process_count: usize = 0;
     
+    // Collect ALL accessible processes (don't stop at max_count - we need to sort them all first)
     for (0..@min(actual_pid_count, pid_buffer.len)) |i| {
-        if (process_count >= max_count) break;
+        // Stop only if we've filled our buffer
+        if (process_count >= processes.len) break;
         
         const pid = pid_buffer[i];
         if (pid <= 0) continue;
         
-        var task: task_t = undefined;
-        const tfp_result = task_for_pid(mach_task_self(), pid, &task);
+        // Use proc_pidinfo instead of task_for_pid (doesn't require special privileges)
+        var task_info_data: proc_taskinfo = undefined;
+        const info_size = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, @ptrCast(&task_info_data), @intCast(@sizeOf(proc_taskinfo)));
         
-        if (tfp_result != KERN_SUCCESS) {
-            // Skip processes we can't access (need root for some)
-            continue;
-        }
-        
-        defer _ = mach_port_deallocate(mach_task_self(), task);
-        
-        var task_info_data: task_basic_info_64_data_t = undefined;
-        var task_info_count: mach_msg_type_number_t = TASK_BASIC_INFO_64_COUNT;
-        
-        const ti_result = task_info(task, TASK_BASIC_INFO_64, &task_info_data, &task_info_count);
-        
-        if (ti_result != KERN_SUCCESS) {
+        // Check if we got valid data - must return exactly the struct size
+        // Some system processes (like WindowServer) may not be accessible without privileges
+        if (info_size != @sizeOf(proc_taskinfo)) {
+            // Skip processes we can't access
             continue;
         }
         
@@ -384,16 +385,13 @@ fn getProcessList(max_count: usize, processes: []ProcessInfo) MemoryError!usize 
             .pid = pid,
             .name = name,
             .name_len = name_len,
-            .resident_size = task_info_data.resident_size,
+            .resident_size = task_info_data.pti_resident_size,
         };
         process_count += 1;
     }
     
     return process_count;
 }
-
-// Helper to get mach_task_self
-extern "c" fn mach_task_self() mach_port_t;
 
 /// Format bytes to human-readable string (MB or GB)
 fn formatBytes(bytes: u64, buffer: []u8) ![]const u8 {
@@ -535,8 +533,9 @@ fn printBreakdown(stats: MemoryStats, opts: Options) !void {
 
 /// Print top processes
 fn printTopProcesses(count: usize, opts: Options) !void {
-    var processes: [100]ProcessInfo = undefined;
-    const actual_count = try getProcessList(count, &processes);
+    // Collect more processes than requested so we can sort and pick the top N
+    var processes: [500]ProcessInfo = undefined;
+    const actual_count = try getProcessList(&processes);
     
     if (actual_count == 0) {
         const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
@@ -544,7 +543,7 @@ fn printTopProcesses(count: usize, opts: Options) !void {
         return;
     }
     
-    // Sort by resident size (descending)
+    // Sort by resident size (descending) - sort ALL collected processes
     for (0..actual_count) |i| {
         var max_idx = i;
         var max_size = processes[i].resident_size;
@@ -561,6 +560,9 @@ fn printTopProcesses(count: usize, opts: Options) !void {
         }
     }
     
+    // Only display the top 'count' processes
+    const display_count = @min(count, actual_count);
+    
     const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     var output_buf: [512]u8 = undefined;
     var mem_buf: [32]u8 = undefined;
@@ -569,10 +571,10 @@ fn printTopProcesses(count: usize, opts: Options) !void {
     const bold = if (opts.color) Color.BOLD else "";
     const cyan = if (opts.color) Color.CYAN else "";
     
-    const header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes by Memory:{s}\n", .{ bold, actual_count, reset });
+    const header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes by Memory:{s}\n", .{ bold, display_count, reset });
     try stdout_file.writeAll(header);
     
-    for (0..actual_count) |i| {
+    for (0..display_count) |i| {
         const proc = processes[i];
         const mem_str = try formatBytes(proc.resident_size, &mem_buf);
         const name = proc.name[0..proc.name_len];
