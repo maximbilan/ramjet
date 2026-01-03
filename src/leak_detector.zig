@@ -162,3 +162,161 @@ pub const LeakInfo = struct {
     growth: u64,
     time_span: u64, // seconds
 };
+
+test "LeakDetector init creates empty detector" {
+    const detector = LeakDetector.init();
+    try std.testing.expectEqual(@as(usize, 0), detector.history_count);
+    try std.testing.expectEqual(@as(usize, 0), detector.current_index);
+}
+
+test "LeakDetector addSnapshot stores process data" {
+    var detector = LeakDetector.init();
+    var processes = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = undefined, .name_len = 0, .resident_size = 1000 },
+        .{ .pid = 200, .name = undefined, .name_len = 0, .resident_size = 2000 },
+    };
+
+    detector.addSnapshot(&processes, 2);
+
+    try std.testing.expectEqual(@as(usize, 1), detector.history_count);
+    try std.testing.expectEqual(@as(usize, 2), detector.history_counts[0]);
+    try std.testing.expectEqual(@as(mach.pid_t, 100), detector.history[0][0].pid);
+    try std.testing.expectEqual(@as(u64, 1000), detector.history[0][0].resident_size);
+    try std.testing.expectEqual(@as(mach.pid_t, 200), detector.history[0][1].pid);
+    try std.testing.expectEqual(@as(u64, 2000), detector.history[0][1].resident_size);
+}
+
+test "LeakDetector detectLeaks requires at least 2 snapshots" {
+    var detector = LeakDetector.init();
+    var processes = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = undefined, .name_len = 0, .resident_size = 1000 },
+    };
+    var leaks: [10]LeakInfo = undefined;
+
+    // No snapshots
+    try std.testing.expectEqual(@as(usize, 0), detector.detectLeaks(&leaks, &processes));
+
+    // One snapshot
+    detector.addSnapshot(&processes, 1);
+    try std.testing.expectEqual(@as(usize, 0), detector.detectLeaks(&leaks, &processes));
+}
+
+test "LeakDetector detectLeaks detects large growth" {
+    var detector = LeakDetector.init();
+    var leaks: [10]LeakInfo = undefined;
+
+    // First snapshot - process with 100MB
+    var processes1 = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = "test", .name_len = 4, .resident_size = 100 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes1, 1);
+
+    // Wait a bit (simulate time passing)
+    std.Thread.sleep(100_000_000); // 100ms
+
+    // Second snapshot - process grew to 200MB (100MB growth > 50MB threshold)
+    var processes2 = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = "test", .name_len = 4, .resident_size = 200 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes2, 1);
+
+    const leak_count = detector.detectLeaks(&leaks, &processes2);
+    try std.testing.expectEqual(@as(usize, 1), leak_count);
+    try std.testing.expectEqual(@as(mach.pid_t, 100), leaks[0].pid);
+    try std.testing.expectEqual(@as(u64, 100 * 1024 * 1024), leaks[0].old_size);
+    try std.testing.expectEqual(@as(u64, 200 * 1024 * 1024), leaks[0].new_size);
+    try std.testing.expectEqual(@as(u64, 100 * 1024 * 1024), leaks[0].growth);
+}
+
+test "LeakDetector detectLeaks detects percentage-based growth" {
+    var detector = LeakDetector.init();
+    var leaks: [10]LeakInfo = undefined;
+
+    // First snapshot - process with 100MB
+    var processes1 = [_]process.ProcessInfo{
+        .{ .pid = 200, .name = "app", .name_len = 3, .resident_size = 100 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes1, 1);
+
+    std.Thread.sleep(100_000_000);
+
+    // Second snapshot - process grew to 130MB (30MB growth, but 30% > 20% threshold)
+    var processes2 = [_]process.ProcessInfo{
+        .{ .pid = 200, .name = "app", .name_len = 3, .resident_size = 130 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes2, 1);
+
+    const leak_count = detector.detectLeaks(&leaks, &processes2);
+    try std.testing.expectEqual(@as(usize, 1), leak_count);
+    try std.testing.expectEqual(@as(mach.pid_t, 200), leaks[0].pid);
+}
+
+test "LeakDetector detectLeaks ignores small growth" {
+    var detector = LeakDetector.init();
+    var leaks: [10]LeakInfo = undefined;
+
+    // First snapshot
+    var processes1 = [_]process.ProcessInfo{
+        .{ .pid = 300, .name = "small", .name_len = 5, .resident_size = 100 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes1, 1);
+
+    std.Thread.sleep(100_000_000);
+
+    // Second snapshot - small growth (10MB < 50MB, and 10% < 20%)
+    var processes2 = [_]process.ProcessInfo{
+        .{ .pid = 300, .name = "small", .name_len = 5, .resident_size = 110 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes2, 1);
+
+    const leak_count = detector.detectLeaks(&leaks, &processes2);
+    try std.testing.expectEqual(@as(usize, 0), leak_count);
+}
+
+test "LeakDetector detectLeaks handles circular buffer" {
+    var detector = LeakDetector.init();
+
+    // Fill up the history buffer (MAX_HISTORY snapshots)
+    var i: usize = 0;
+    while (i < MAX_HISTORY) : (i += 1) {
+        var processes = [_]process.ProcessInfo{
+            .{ .pid = 100, .name = "test", .name_len = 4, .resident_size = 100 * 1024 * 1024 },
+        };
+        detector.addSnapshot(&processes, 1);
+        std.Thread.sleep(10_000_000); // 10ms between snapshots
+    }
+
+    // Add one more to trigger circular buffer
+    var processes_new = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = "test", .name_len = 4, .resident_size = 200 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes_new, 1);
+
+    // Should still have MAX_HISTORY snapshots
+    try std.testing.expectEqual(MAX_HISTORY, detector.history_count);
+}
+
+test "LeakDetector detectLeaks ignores processes that no longer exist" {
+    var detector = LeakDetector.init();
+    var leaks: [10]LeakInfo = undefined;
+
+    // First snapshot - two processes
+    var processes1 = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = "proc1", .name_len = 5, .resident_size = 100 * 1024 * 1024 },
+        .{ .pid = 200, .name = "proc2", .name_len = 5, .resident_size = 200 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes1, 2);
+
+    std.Thread.sleep(100_000_000);
+
+    // Second snapshot - only one process (other exited)
+    var processes2 = [_]process.ProcessInfo{
+        .{ .pid = 100, .name = "proc1", .name_len = 5, .resident_size = 200 * 1024 * 1024 },
+    };
+    detector.addSnapshot(&processes2, 1);
+
+    const leak_count = detector.detectLeaks(&leaks, &processes2);
+    // Should detect leak for process 100, but not for 200 (which no longer exists)
+    try std.testing.expectEqual(@as(usize, 1), leak_count);
+    try std.testing.expectEqual(@as(mach.pid_t, 100), leaks[0].pid);
+}

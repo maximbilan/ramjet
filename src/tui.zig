@@ -206,6 +206,53 @@ pub fn sortProcesses(processes: []process.ProcessInfo, count: usize, mode: SortM
     }
 }
 
+test "sortProcesses sorts by memory correctly" {
+    var processes = [_]process.ProcessInfo{
+        .{ .pid = 1, .name = undefined, .name_len = 0, .resident_size = 100 },
+        .{ .pid = 2, .name = undefined, .name_len = 0, .resident_size = 300 },
+        .{ .pid = 3, .name = undefined, .name_len = 0, .resident_size = 200 },
+    };
+
+    sortProcesses(&processes, 3, .memory);
+
+    try std.testing.expectEqual(@as(u64, 300), processes[0].resident_size);
+    try std.testing.expectEqual(@as(u64, 200), processes[1].resident_size);
+    try std.testing.expectEqual(@as(u64, 100), processes[2].resident_size);
+}
+
+test "sortProcesses sorts by PID correctly" {
+    var processes = [_]process.ProcessInfo{
+        .{ .pid = 300, .name = undefined, .name_len = 0, .resident_size = 100 },
+        .{ .pid = 100, .name = undefined, .name_len = 0, .resident_size = 200 },
+        .{ .pid = 200, .name = undefined, .name_len = 0, .resident_size = 300 },
+    };
+
+    sortProcesses(&processes, 3, .pid);
+
+    const mach = @import("mach.zig");
+    try std.testing.expectEqual(@as(mach.pid_t, 100), processes[0].pid);
+    try std.testing.expectEqual(@as(mach.pid_t, 200), processes[1].pid);
+    try std.testing.expectEqual(@as(mach.pid_t, 300), processes[2].pid);
+}
+
+test "sortProcesses sorts by name correctly" {
+    const name1 = "zebra".*;
+    const name2 = "apple".*;
+    const name3 = "banana".*;
+
+    var processes = [_]process.ProcessInfo{
+        .{ .pid = 1, .name = name1, .name_len = name1.len, .resident_size = 100 },
+        .{ .pid = 2, .name = name2, .name_len = name2.len, .resident_size = 200 },
+        .{ .pid = 3, .name = name3, .name_len = name3.len, .resident_size = 300 },
+    };
+
+    sortProcesses(&processes, 3, .name);
+
+    try std.testing.expectEqualStrings("apple", processes[0].name[0..processes[0].name_len]);
+    try std.testing.expectEqualStrings("banana", processes[1].name[0..processes[1].name_len]);
+    try std.testing.expectEqualStrings("zebra", processes[2].name[0..processes[2].name_len]);
+}
+
 /// Render the TUI
 pub fn render(
     stats: memory.MemoryStats,
