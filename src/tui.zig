@@ -20,6 +20,7 @@ pub const TUIState = struct {
     show_leaks: bool = false,
     show_help: bool = false,
     process_count: usize = 20,
+    leak_toggle_message: ?i64 = null, // Timestamp when leak toggle was pressed (for showing message)
 };
 
 /// Sort modes
@@ -120,14 +121,13 @@ pub fn getTerminalSize() struct { width: u16, height: u16 } {
 }
 
 /// Read a single character from stdin (non-blocking)
-/// Uses a simple approach - in practice, the 200ms sleep in the main loop
-/// makes this effectively non-blocking for the TUI
+/// In raw mode with VMIN=0 and VTIME=0, read should return immediately if no data
 pub fn readChar() ?u8 {
     var buf: [1]u8 = undefined;
     const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
 
-    // Try to read - in raw mode with VMIN=0 and VTIME=0, this should return immediately
-    // if no data is available. However, if it blocks, the main loop delay helps.
+    // Try to read - in raw mode this should be non-blocking
+    // If it blocks briefly, the reduced sleep time (50ms) minimizes delay
     const bytes_read = stdin_file.read(&buf) catch return null;
     if (bytes_read == 0) return null;
     return buf[0];
@@ -262,6 +262,7 @@ pub fn render(
     leaks: []const leak_detector.LeakInfo,
     leak_count: usize,
     opts: cli.Options,
+    detect_leaks: bool,
 ) !void {
     const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
     const term_size = getTerminalSize();
@@ -274,10 +275,33 @@ pub fn render(
     var header_buf: [512]u8 = undefined;
     try renderHeader(stdout_file, stats, opts, &header_buf);
 
+    // Show leak toggle status message (before leaks section)
+    if (state.leak_toggle_message) |timestamp| {
+        const now = std.time.timestamp();
+        const elapsed = now - timestamp;
+        if (elapsed < 2) { // Show message for 2 seconds
+            var status_buf: [256]u8 = undefined;
+            try renderLeakToggleStatus(stdout_file, state.show_leaks, leak_count, detect_leaks, opts, &status_buf);
+        } else {
+            state.leak_toggle_message = null; // Clear message after timeout
+        }
+    }
+
     // Memory leaks section (if enabled)
     if (state.show_leaks and leak_count > 0) {
         var leak_buf: [512]u8 = undefined;
         try renderLeaks(stdout_file, leaks, leak_count, opts, &leak_buf);
+    } else if (state.show_leaks and detect_leaks) {
+        // Show indicator that leak detection is on but no leaks found
+        var status_buf: [256]u8 = undefined;
+        const reset = if (opts.color) colors.Color.RESET else "";
+        const green = if (opts.color) colors.Color.GREEN else "";
+        const msg = try std.fmt.bufPrint(
+            &status_buf,
+            "\n{s}✓ Leak detection active - monitoring for leaks...{s}\n",
+            .{ green, reset },
+        );
+        try stdout_file.writeAll(msg);
     }
 
     // Help screen (if enabled)
@@ -310,7 +334,48 @@ pub fn render(
 
     // Footer with controls
     var footer_buf: [256]u8 = undefined;
-    try renderFooter(stdout_file, &footer_buf);
+    try renderFooter(stdout_file, state, detect_leaks, opts, &footer_buf);
+}
+
+/// Render leak toggle status message
+fn renderLeakToggleStatus(stdout_file: std.fs.File, show_leaks: bool, leak_count: usize, detect_leaks_enabled: bool, opts: cli.Options, buf: []u8) !void {
+    const reset = if (opts.color) colors.Color.RESET else "";
+    const green = if (opts.color) colors.Color.GREEN else "";
+    const yellow = if (opts.color) colors.Color.YELLOW else "";
+    const red = if (opts.color) colors.Color.RED else "";
+    const bold = if (opts.color) colors.Color.BOLD else "";
+
+    if (!detect_leaks_enabled) {
+        const msg = try std.fmt.bufPrint(
+            buf,
+            "\n{s}{s}⚠ Leak detection is disabled. Use --detect-leaks flag to enable.{s}{s}\n",
+            .{ yellow, bold, reset, reset },
+        );
+        try stdout_file.writeAll(msg);
+    } else if (show_leaks) {
+        if (leak_count > 0) {
+            const msg = try std.fmt.bufPrint(
+                buf,
+                "\n{s}{s}✓ Leak detection: ON - {d} leak(s) detected{s}{s}\n",
+                .{ red, bold, leak_count, reset, reset },
+            );
+            try stdout_file.writeAll(msg);
+        } else {
+            const msg = try std.fmt.bufPrint(
+                buf,
+                "\n{s}{s}✓ Leak detection: ON - No leaks detected{s}{s}\n",
+                .{ green, bold, reset, reset },
+            );
+            try stdout_file.writeAll(msg);
+        }
+    } else {
+        const msg = try std.fmt.bufPrint(
+            buf,
+            "\n{s}{s}○ Leak detection: OFF (press 'l' to enable){s}{s}\n",
+            .{ yellow, bold, reset, reset },
+        );
+        try stdout_file.writeAll(msg);
+    }
 }
 
 /// Render header with memory statistics
@@ -424,11 +489,23 @@ fn renderProcess(stdout_file: std.fs.File, proc: process.ProcessInfo, selected: 
 }
 
 /// Render footer with controls
-fn renderFooter(stdout_file: std.fs.File, buf: []u8) !void {
+fn renderFooter(stdout_file: std.fs.File, state: *TUIState, detect_leaks: bool, opts: cli.Options, buf: []u8) !void {
+    _ = opts; // May be used in future
+    
+    // Show leak detection status in footer (only if detect_leaks is enabled)
+    var leak_status: []const u8 = "";
+    if (detect_leaks) {
+        if (state.show_leaks) {
+            leak_status = " [ON]";
+        } else {
+            leak_status = " [OFF]";
+        }
+    }
+    
     const footer = try std.fmt.bufPrint(
         buf,
-        "\nControls: [↑↓] Navigate  [s] Sort  [l] Toggle Leaks  [r] Refresh  [q] Quit  [h] Help\n",
-        .{},
+        "\nControls: [↑↓] Navigate  [s] Sort  [l] Toggle Leaks{s}  [r] Refresh  [q] Quit  [h] Help\n",
+        .{leak_status},
     );
     try stdout_file.writeAll(footer);
 }
@@ -552,9 +629,9 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
             leak_count = detector.detectLeaks(&leak_buffer, &processes_buffer);
         }
 
-        // Render UI (only if help is not showing, or show both)
+        // Render UI first (before checking input) to ensure initial display
         if (!state.show_help) {
-            try render(stats, &processes_buffer, process_count, &state, &leak_buffer, leak_count, opts);
+            try render(stats, &processes_buffer, process_count, &state, &leak_buffer, leak_count, opts, detect_leaks);
         } else {
             // Show help screen
             const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
@@ -563,7 +640,7 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
             try renderHelp(stdout_file, opts, &help_buf);
         }
 
-        // Handle input (non-blocking)
+        // Handle input and process immediately for responsive feel
         if (readKey()) |key| {
             switch (key) {
                 .quit, .escape => break,
@@ -586,6 +663,8 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
                 },
                 .toggle_leaks => {
                     state.show_leaks = !state.show_leaks;
+                    // Set timestamp to show status message
+                    state.leak_toggle_message = std.time.timestamp();
                 },
                 .refresh => {
                     // Force refresh by continuing loop
@@ -598,7 +677,8 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
         }
 
         // Small delay to prevent CPU spinning and allow input processing
-        std.Thread.sleep(200_000_000); // 200ms - good balance for responsiveness
+        // Reduced to 50ms for better responsiveness
+        std.Thread.sleep(50_000_000); // 50ms - much more responsive
     }
 }
 

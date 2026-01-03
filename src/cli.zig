@@ -80,7 +80,7 @@ test "Options validate accepts valid top count" {
 }
 
 // Version constant
-pub const VERSION = "0.2.0";
+pub const VERSION = "0.2.1";
 
 /// Parse command-line arguments
 pub fn parseArgs(args: [][:0]u8) Options {
