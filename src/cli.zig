@@ -14,6 +14,8 @@ pub const Options = struct {
     color: bool = true,
     breakdown: bool = false,
     json: bool = false,
+    interactive: bool = false,
+    detect_leaks: bool = false,
 
     /// Validate options and return error if invalid
     pub fn validate(self: Options) !void {
@@ -34,8 +36,51 @@ pub const Options = struct {
     }
 };
 
+test "Options validate accepts valid options" {
+    var opts = Options{
+        .watch_interval = 5,
+        .top = 10,
+    };
+    try opts.validate();
+}
+
+test "Options validate rejects zero watch interval" {
+    var opts = Options{
+        .watch_interval = 0,
+    };
+    try std.testing.expectError(error.InvalidWatchInterval, opts.validate());
+}
+
+test "Options validate rejects too large watch interval" {
+    var opts = Options{
+        .watch_interval = 3601,
+    };
+    try std.testing.expectError(error.WatchIntervalTooLarge, opts.validate());
+}
+
+test "Options validate rejects zero top count" {
+    var opts = Options{
+        .top = 0,
+    };
+    try std.testing.expectError(error.InvalidTopCount, opts.validate());
+}
+
+test "Options validate rejects too large top count" {
+    var opts = Options{
+        .top = 101,
+    };
+    try std.testing.expectError(error.TopCountTooLarge, opts.validate());
+}
+
+test "Options validate accepts valid top count" {
+    var opts = Options{
+        .top = 50,
+    };
+    try opts.validate();
+}
+
 // Version constant
-pub const VERSION = "0.1.1";
+pub const VERSION = "0.2.0";
 
 /// Parse command-line arguments
 pub fn parseArgs(args: [][:0]u8) Options {
@@ -77,6 +122,10 @@ pub fn parseArgs(args: [][:0]u8) Options {
             opts.breakdown = true;
         } else if (std.mem.eql(u8, arg, "--json")) {
             opts.json = true;
+        } else if (std.mem.eql(u8, arg, "--interactive") or std.mem.eql(u8, arg, "-i")) {
+            opts.interactive = true;
+        } else if (std.mem.eql(u8, arg, "--detect-leaks")) {
+            opts.detect_leaks = true;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
             printVersion();
             std.posix.exit(0);
@@ -116,6 +165,8 @@ fn printHelp() void {
         \\  --top N                   Show top N processes by memory usage (1-100)
         \\  -b, --breakdown           Show detailed memory breakdown
         \\  --json                     Output in JSON format
+        \\  -i, --interactive          Interactive TUI mode
+        \\  --detect-leaks             Detect memory leaks (requires watch/interactive mode)
         \\  --no-color                Disable colored output
         \\  -v, --version             Show version information
         \\  -h, --help               Show this help message
