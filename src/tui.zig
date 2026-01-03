@@ -121,14 +121,13 @@ pub fn getTerminalSize() struct { width: u16, height: u16 } {
 }
 
 /// Read a single character from stdin (non-blocking)
-/// Uses a simple approach - in practice, the 200ms sleep in the main loop
-/// makes this effectively non-blocking for the TUI
+/// In raw mode with VMIN=0 and VTIME=0, read should return immediately if no data
 pub fn readChar() ?u8 {
     var buf: [1]u8 = undefined;
     const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
 
-    // Try to read - in raw mode with VMIN=0 and VTIME=0, this should return immediately
-    // if no data is available. However, if it blocks, the main loop delay helps.
+    // Try to read - in raw mode this should be non-blocking
+    // If it blocks briefly, the reduced sleep time (50ms) minimizes delay
     const bytes_read = stdin_file.read(&buf) catch return null;
     if (bytes_read == 0) return null;
     return buf[0];
@@ -630,7 +629,7 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
             leak_count = detector.detectLeaks(&leak_buffer, &processes_buffer);
         }
 
-        // Render UI (only if help is not showing, or show both)
+        // Render UI first (before checking input) to ensure initial display
         if (!state.show_help) {
             try render(stats, &processes_buffer, process_count, &state, &leak_buffer, leak_count, opts, detect_leaks);
         } else {
@@ -641,7 +640,7 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
             try renderHelp(stdout_file, opts, &help_buf);
         }
 
-        // Handle input (non-blocking)
+        // Handle input and process immediately for responsive feel
         if (readKey()) |key| {
             switch (key) {
                 .quit, .escape => break,
@@ -678,7 +677,8 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
         }
 
         // Small delay to prevent CPU spinning and allow input processing
-        std.Thread.sleep(200_000_000); // 200ms - good balance for responsiveness
+        // Reduced to 50ms for better responsiveness
+        std.Thread.sleep(50_000_000); // 50ms - much more responsive
     }
 }
 
