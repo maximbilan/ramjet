@@ -11,12 +11,15 @@ A fast, lightweight CLI tool for macOS that reports system-wide RAM usage using 
 - **Watch mode**: Continuous monitoring with configurable interval
 - **Interactive TUI**: Full-screen terminal interface with keyboard navigation
 - **Memory leak detection**: Automatically detect processes with growing memory usage
-- **Process listing**: Top memory-consuming processes
+- **Process listing**: Top memory-consuming processes with filtering and sorting
 - **Detailed breakdown**: Active, wired, inactive, speculative, compressed memory
 - **Color output**: Color-coded by usage level (green/yellow/red)
-- **JSON output**: Machine-readable JSON format for scripting
+- **JSON/CSV export**: Machine-readable formats for scripting and data analysis
 - **Swap statistics**: Swap usage information
 - **Memory pressure**: System memory pressure indicator
+- **Process filtering**: Filter processes by minimum memory usage
+- **Multiple sort modes**: Sort by memory, PID, or name
+- **Quiet mode**: Suppress non-essential output for scripting
 
 ## Requirements
 
@@ -69,6 +72,18 @@ The binary will be created at `zig-out/bin/ramjet`.
 
 # JSON output (for scripting)
 ./zig-out/bin/ramjet --json
+
+# Filter processes by minimum memory (50MB)
+./zig-out/bin/ramjet --top 20 --min-memory 52428800
+
+# Sort processes by name
+./zig-out/bin/ramjet --top 10 --sort name
+
+# Export to CSV
+./zig-out/bin/ramjet --export csv --top 5 > processes.csv
+
+# Quiet mode (suppress non-essential output)
+./zig-out/bin/ramjet --quiet --json
 ```
 
 ## Command-Line Options
@@ -78,8 +93,12 @@ The binary will be created at `zig-out/bin/ramjet`.
 - `-i, --interactive` - Interactive TUI mode with keyboard controls
 - `--detect-leaks` - Detect memory leaks (requires watch or interactive mode)
 - `--top N` - Show top N processes by memory usage (1-100)
+- `--min-memory BYTES` - Filter processes with memory >= BYTES (e.g., 52428800 for 50MB)
+- `--sort MODE` - Sort processes: `memory` (default), `pid`, or `name`
 - `-b, --breakdown` - Show detailed memory breakdown
 - `--json` - Output in JSON format
+- `--export FORMAT` - Export to JSON or CSV format (includes process data with `--top`)
+- `-q, --quiet` - Quiet mode (suppress non-essential output)
 - `--no-color` - Disable colored output
 - `-v, --version` - Show version information
 - `-h, --help` - Show help message
@@ -122,13 +141,25 @@ Memory Breakdown:
 Total:    24.0 GB
 Used:     11.8 GB (49.1%)
 ...
-Top 5 Processes by Memory:
+Top 5 Processes (showing 5 of 412):
     1234  Chrome             2.1 GB
     5678  Xcode              1.8 GB
     9012  Slack              512.3 MB
     3456  Terminal           128.5 MB
     7890  Finder             64.2 MB
 ```
+
+### With Filtering and Sorting
+```
+Total:    24.0 GB
+Used:     11.8 GB (49.1%)
+...
+Top 20 Processes (showing 20 of 42):
+    1234  Chrome             2.1 GB
+    5678  Xcode              1.8 GB
+    ...
+```
+(Filtered to show only processes using >= 50MB, sorted by memory)
 
 ### JSON Output
 ```json
@@ -137,10 +168,61 @@ Top 5 Processes by Memory:
   "used": 12666736640,
   "free": 357171200,
   "cached": 10000000000,
+  "usage_percent": 49.15,
+  "active": 9000000000,
+  "wired": 3666736640,
+  "inactive": 8000000000,
+  "speculative": 2000000000,
+  "compressed": 500000000,
   "swap_used": 0,
   "swap_total": 0,
   "pressure": "Normal"
 }
+```
+
+### JSON Export with Processes
+```bash
+ramjet --export json --top 5
+```
+```json
+{
+  "total": 25769803776,
+  "used": 12666736640,
+  "free": 357171200,
+  "cached": 10000000000,
+  "usage_percent": 49.15,
+  "active": 9000000000,
+  "wired": 3666736640,
+  "inactive": 8000000000,
+  "speculative": 2000000000,
+  "compressed": 500000000,
+  "swap_used": 0,
+  "swap_total": 0,
+  "pressure": "Normal",
+  "processes": [
+    {"pid": 1234, "name": "Chrome", "memory": 2252341248},
+    {"pid": 5678, "name": "Xcode", "memory": 1932735283},
+    {"pid": 9012, "name": "Slack", "memory": 537182208},
+    {"pid": 3456, "name": "Terminal", "memory": 134742016},
+    {"pid": 7890, "name": "Finder", "memory": 67371008}
+  ]
+}
+```
+
+### CSV Export
+```bash
+ramjet --export csv --top 5
+```
+```csv
+total,used,free,cached,usage_percent,active,wired,inactive,speculative,compressed,swap_used,swap_total,pressure
+25769803776,12666736640,357171200,10000000000,49.15,9000000000,3666736640,8000000000,2000000000,500000000,0,0,"Normal"
+
+pid,name,memory
+1234,"Chrome",2252341248
+5678,"Xcode",1932735283
+9012,"Slack",537182208
+3456,"Terminal",134742016
+7890,"Finder",67371008
 ```
 
 ### Interactive TUI Mode
@@ -236,6 +318,49 @@ ramjet --interactive --detect-leaks
 ```
 
 ## Process Listing
+
+### Filtering and Sorting
+
+You can filter and sort processes using the following options:
+
+- **`--min-memory BYTES`**: Filter processes to show only those using at least the specified amount of memory. Useful for focusing on memory-intensive processes.
+  ```bash
+  # Show top 20 processes using at least 50MB
+  ramjet --top 20 --min-memory 52428800
+  ```
+
+- **`--sort MODE`**: Sort processes by different criteria:
+  - `memory` (default): Sort by memory usage (descending)
+  - `pid`: Sort by process ID (ascending)
+  - `name`: Sort alphabetically by process name
+  ```bash
+  # Show top 10 processes sorted by name
+  ramjet --top 10 --sort name
+  ```
+
+The output will show "Top N Processes (showing X of Y)" when processes are filtered or when fewer processes are displayed than available.
+
+### Export Formats
+
+Export memory statistics and process data to structured formats:
+
+- **JSON Export**: `ramjet --export json --top 5 > output.json`
+  - Includes full memory statistics and process list
+  - Machine-readable format for scripting and analysis
+
+- **CSV Export**: `ramjet --export csv --top 5 > output.csv`
+  - Comma-separated values for spreadsheet applications
+  - Two sections: memory stats and process list
+
+### Quiet Mode
+
+Use `--quiet` or `-q` to suppress non-essential output, useful for scripting:
+```bash
+# Only output JSON, no other messages
+ramjet --quiet --json > stats.json
+```
+
+### Process Access
 
 Note: Process memory information requires appropriate permissions. Some system processes (like WindowServer, kernel_task) may not be accessible via `proc_pidinfo` without special privileges due to macOS security restrictions. These processes will not appear in the process list. Activity Monitor can show them because it runs with system entitlements. The tool will gracefully handle inaccessible processes and show all processes it can access.
 
