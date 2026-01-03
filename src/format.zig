@@ -55,23 +55,6 @@ pub fn formatBytesCompact(bytes: u64, buffer: []u8) ![]const u8 {
     }
 }
 
-/// Right-pad a string to a given width (adds spaces on the right)
-pub fn padRight(str: []const u8, width: usize, buffer: []u8) []const u8 {
-    if (str.len >= width) return str;
-    @memcpy(buffer[0..str.len], str);
-    @memset(buffer[str.len..width], ' ');
-    return buffer[0..width];
-}
-
-/// Left-pad a string to a given width (adds spaces on the left)
-pub fn padLeft(str: []const u8, width: usize, buffer: []u8) []const u8 {
-    if (str.len >= width) return str;
-    const pad_len = width - str.len;
-    @memset(buffer[0..pad_len], ' ');
-    @memcpy(buffer[pad_len..width], str);
-    return buffer[0..width];
-}
-
 test "formatBytes formats GB correctly" {
     var buf: [32]u8 = undefined;
     const result = try formatBytes(2_147_483_648, &buf); // 2GB
@@ -89,18 +72,4 @@ test "formatBytesCompact formats correctly" {
     try std.testing.expectEqualStrings("2.0G", try formatBytesCompact(2_147_483_648, &buf));
     try std.testing.expectEqualStrings("5.0M", try formatBytesCompact(5_242_880, &buf));
     try std.testing.expectEqualStrings("1.5K", try formatBytesCompact(1536, &buf));
-}
-
-test "padRight pads correctly" {
-    var buf: [64]u8 = undefined;
-    const padded = padRight("test", 10, &buf);
-    try std.testing.expectEqualStrings("test      ", padded);
-    try std.testing.expectEqual(@as(usize, 10), padded.len);
-}
-
-test "padLeft pads correctly" {
-    var buf: [64]u8 = undefined;
-    const padded = padLeft("test", 10, &buf);
-    try std.testing.expectEqualStrings("      test", padded);
-    try std.testing.expectEqual(@as(usize, 10), padded.len);
 }

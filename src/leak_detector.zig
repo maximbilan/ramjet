@@ -25,13 +25,18 @@ pub const LeakDetector = struct {
 
     /// Initialize leak detector
     pub fn init() LeakDetector {
-        return LeakDetector{
+        var detector = LeakDetector{
             .history = undefined,
             .history_counts = undefined,
             .timestamps = undefined,
             .history_count = 0,
             .current_index = 0,
         };
+        // Initialize arrays to zero for safety
+        @memset(&detector.history_counts, 0);
+        @memset(&detector.timestamps, 0);
+        // Note: history array elements are initialized when snapshots are added
+        return detector;
     }
 
     /// Add a snapshot of current processes

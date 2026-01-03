@@ -111,7 +111,10 @@ pub fn parseArgs(args: [][:0]u8) Options {
                         var buf: [256]u8 = undefined;
                         if (std.fmt.bufPrint(&buf, "Warning: --top count must be between 1 and 100, got {d}\n", .{count})) |msg| {
                             _ = stderr_file.writeAll(msg) catch {};
-                        } else |_| {}
+                        } else |_| {
+                            // Buffer too small - unlikely but handle gracefully
+                            _ = stderr_file.writeAll("Warning: --top count out of range\n") catch {};
+                        }
                     }
                     i += 1;
                 } else |_| {}
@@ -138,7 +141,10 @@ pub fn parseArgs(args: [][:0]u8) Options {
             var buf: [256]u8 = undefined;
             if (std.fmt.bufPrint(&buf, "Warning: unknown argument '{s}'\n", .{arg})) |msg| {
                 _ = stderr_file.writeAll(msg) catch {};
-            } else |_| {}
+            } else |_| {
+                // Buffer too small - unlikely but handle gracefully
+                _ = stderr_file.writeAll("Warning: unknown argument\n") catch {};
+            }
         }
 
         i += 1;

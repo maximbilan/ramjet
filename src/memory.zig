@@ -34,13 +34,6 @@ pub const MemoryStats = struct {
 };
 
 /// Get VM statistics using Mach APIs and convert to MemoryStats
-///
-/// Example:
-/// ```zig
-/// const stats = try getVMStatistics();
-/// std.debug.print("Total memory: {} bytes\n", .{stats.total});
-/// std.debug.print("Usage: {d:.1}%\n", .{stats.usagePercent()});
-/// ```
 pub fn getVMStatistics() mach.MachError!MemoryStats {
     const vm_info = try mach.getVMStatistics64();
 

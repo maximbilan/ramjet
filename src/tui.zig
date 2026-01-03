@@ -4,7 +4,6 @@
 //! for navigating and viewing memory statistics.
 
 const std = @import("std");
-const c = std.c;
 const memory = @import("memory.zig");
 const process = @import("process.zig");
 const format = @import("format.zig");
@@ -35,8 +34,6 @@ const ESC = "\x1b";
 const CLEAR_SCREEN = ESC ++ "[2J" ++ ESC ++ "[H";
 const HIDE_CURSOR = ESC ++ "[?25l";
 const SHOW_CURSOR = ESC ++ "[?25h";
-const SAVE_CURSOR = ESC ++ "[s";
-const RESTORE_CURSOR = ESC ++ "[u";
 
 // Store original terminal state for restoration
 var original_termios: ?std.posix.termios = null;
@@ -489,8 +486,7 @@ fn renderProcess(stdout_file: std.fs.File, proc: process.ProcessInfo, selected: 
 }
 
 /// Render footer with controls
-fn renderFooter(stdout_file: std.fs.File, state: *TUIState, detect_leaks: bool, opts: cli.Options, buf: []u8) !void {
-    _ = opts; // May be used in future
+fn renderFooter(stdout_file: std.fs.File, state: *TUIState, detect_leaks: bool, _: cli.Options, buf: []u8) !void {
     
     // Show leak detection status in footer (only if detect_leaks is enabled)
     var leak_status: []const u8 = "";
