@@ -25,7 +25,7 @@ pub const MemoryStats = struct {
     // Pressure
     pressure: colors.MemoryPressure,
     page_size: u64,
-    
+
     /// Calculate usage percentage
     pub fn usagePercent(self: MemoryStats) f64 {
         if (self.total == 0) return 0.0;
@@ -36,11 +36,11 @@ pub const MemoryStats = struct {
 /// Get VM statistics using Mach APIs and convert to MemoryStats
 pub fn getVMStatistics() mach.MachError!MemoryStats {
     const vm_info = try mach.getVMStatistics64();
-    
+
     // Get system page size
     const page_size = mach.getPageSize();
     const page_size_u64: u64 = @intCast(page_size);
-    
+
     // Calculate memory values from page counts
     const free_bytes = vm_info.free_count * page_size_u64;
     const active_bytes = vm_info.active_count * page_size_u64;
@@ -48,27 +48,27 @@ pub fn getVMStatistics() mach.MachError!MemoryStats {
     const wire_bytes = vm_info.wire_count * page_size_u64;
     const speculative_bytes = vm_info.speculative_count * page_size_u64;
     const compressed_bytes = vm_info.compressor_page_count * page_size_u64;
-    
+
     // Swap: estimate from swapouts (pages swapped out)
     const swap_used_bytes = vm_info.swapouts * page_size_u64;
     const swap_total = if (mach.getSwapTotal() > 0) mach.getSwapTotal() else swap_used_bytes;
-    
+
     // Used memory = active + wired (memory actively in use)
     const used = active_bytes + wire_bytes;
-    
+
     // Cached memory = inactive + speculative (can be reclaimed but currently cached)
     const cached = inactive_bytes + speculative_bytes;
-    
+
     // Free memory = completely free pages
     const free = free_bytes;
-    
+
     // Get total memory
     const total = try mach.getTotalMemory();
-    
+
     // Get memory pressure
     const pressure_raw = mach.getMemoryPressure() catch 0;
     const pressure = colors.MemoryPressure.fromRaw(@intCast(@min(pressure_raw, 3)));
-    
+
     return MemoryStats{
         .total = total,
         .used = used,
@@ -102,7 +102,7 @@ test "MemoryStats usagePercent calculates correctly" {
         .pressure = .normal,
         .page_size = 4096,
     };
-    
+
     const percent = stats.usagePercent();
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), percent, 0.1);
 }

@@ -16,9 +16,9 @@ const std = @import("std");
 pub fn formatBytes(bytes: u64, buffer: []u8) ![]const u8 {
     const gb: f64 = 1024.0 * 1024.0 * 1024.0;
     const mb: f64 = 1024.0 * 1024.0;
-    
+
     const bytes_f64: f64 = @floatFromInt(bytes);
-    
+
     if (bytes_f64 >= gb) {
         const gb_value = bytes_f64 / gb;
         return try std.fmt.bufPrint(buffer, "{d:.1} GB", .{gb_value});
@@ -40,9 +40,9 @@ pub fn formatBytesCompact(bytes: u64, buffer: []u8) ![]const u8 {
     const gb: f64 = 1024.0 * 1024.0 * 1024.0;
     const mb: f64 = 1024.0 * 1024.0;
     const kb: f64 = 1024.0;
-    
+
     const bytes_f64: f64 = @floatFromInt(bytes);
-    
+
     if (bytes_f64 >= gb) {
         const gb_value = bytes_f64 / gb;
         return try std.fmt.bufPrint(buffer, "{d:.1}G", .{gb_value});

@@ -24,12 +24,12 @@ pub const MemoryPressure = enum(u2) {
     warn = 1,
     urgent = 2,
     critical = 3,
-    
+
     /// Convert from raw C uint value
     pub fn fromRaw(value: u2) MemoryPressure {
         return @enumFromInt(@min(value, 3));
     }
-    
+
     /// Get human-readable string
     pub fn toString(self: MemoryPressure) []const u8 {
         return switch (self) {

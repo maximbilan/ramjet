@@ -27,47 +27,47 @@ comptime {
 pub fn main() !void {
     const args = try std.process.argsAlloc(std.heap.page_allocator);
     defer std.process.argsFree(std.heap.page_allocator, args);
-    
+
     const opts = cli.parseArgs(args);
-    
+
     if (opts.watch) {
         // Watch mode
         while (true) {
             output.clearScreen();
-            
+
             const stats = try memory.getVMStatistics();
-            
+
             if (opts.compact) {
                 try output.printCompact(stats, opts);
             } else {
                 try output.printMemoryStats(stats, opts);
             }
-            
+
             if (opts.breakdown) {
                 try output.printBreakdown(stats, opts);
             }
-            
+
             if (opts.top) |count| {
                 try output.printTopProcesses(count, opts);
             }
-            
+
             // Sleep for interval
             std.Thread.sleep(opts.watch_interval * std.time.ns_per_s);
         }
     } else {
         // Single run
         const stats = try memory.getVMStatistics();
-        
+
         if (opts.compact) {
             try output.printCompact(stats, opts);
         } else {
             try output.printMemoryStats(stats, opts);
         }
-        
+
         if (opts.breakdown) {
             try output.printBreakdown(stats, opts);
         }
-        
+
         if (opts.top) |count| {
             try output.printTopProcesses(count, opts);
         }

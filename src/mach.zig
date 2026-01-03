@@ -145,7 +145,7 @@ pub fn getPageSize() c_int {
 pub fn getTotalMemory() MachError!u64 {
     var size: usize = @sizeOf(u64);
     var memsize: u64 = 0;
-    
+
     const result = sysctlbyname(
         "hw.memsize",
         @ptrCast(&memsize),
@@ -153,11 +153,11 @@ pub fn getTotalMemory() MachError!u64 {
         null,
         0,
     );
-    
+
     if (result != 0) {
         return error.SysctlFailed;
     }
-    
+
     return memsize;
 }
 
@@ -166,7 +166,7 @@ pub fn getTotalMemory() MachError!u64 {
 pub fn getSwapTotal() u64 {
     var size: usize = @sizeOf(u64);
     var swap_total: u64 = 0;
-    
+
     const result = sysctlbyname(
         "vm.swapusage",
         @ptrCast(&swap_total),
@@ -174,12 +174,12 @@ pub fn getSwapTotal() u64 {
         null,
         0,
     );
-    
+
     // If this fails, return 0 - will be estimated from vm_statistics64 swapouts
     if (result != 0) {
         return 0;
     }
-    
+
     return swap_total;
 }
 
@@ -187,7 +187,7 @@ pub fn getSwapTotal() u64 {
 pub fn getMemoryPressure() MachError!c_uint {
     var size: usize = @sizeOf(c_uint);
     var pressure: c_uint = 0;
-    
+
     const result = sysctlbyname(
         "vm.memory_pressure",
         @ptrCast(&pressure),
@@ -195,11 +195,11 @@ pub fn getMemoryPressure() MachError!c_uint {
         null,
         0,
     );
-    
+
     if (result != 0) {
         return error.MemoryPressureFailed;
     }
-    
+
     return pressure;
 }
 
@@ -209,21 +209,21 @@ pub fn getVMStatistics64() MachError!vm_statistics64_data_t {
     if (host == 0) {
         return error.MachHostSelfFailed;
     }
-    
+
     var vm_info: vm_statistics64_data_t = undefined;
     var count: mach_msg_type_number_t = HOST_VM_INFO64_COUNT;
-    
+
     const result = host_statistics64(
         host,
         HOST_VM_INFO64,
         &vm_info,
         &count,
     );
-    
+
     if (result != KERN_SUCCESS) {
         return error.HostStatisticsFailed;
     }
-    
+
     return vm_info;
 }
 
@@ -231,12 +231,12 @@ pub fn getVMStatistics64() MachError!vm_statistics64_data_t {
 pub fn getProcessTaskInfo(pid: pid_t) ?proc_taskinfo {
     var task_info_data: proc_taskinfo = undefined;
     const info_size = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, @ptrCast(&task_info_data), @intCast(@sizeOf(proc_taskinfo)));
-    
+
     // Check if we got valid data - must return exactly the struct size
     if (info_size != @sizeOf(proc_taskinfo)) {
         return null; // Process not accessible
     }
-    
+
     return task_info_data;
 }
 
@@ -244,22 +244,22 @@ pub fn getProcessTaskInfo(pid: pid_t) ?proc_taskinfo {
 pub fn getProcessPath(pid: pid_t) ?[]const u8 {
     var path_buffer: [MAXPATHLEN]u8 = undefined;
     const path_len = proc_pidpath(pid, &path_buffer[0], MAXPATHLEN);
-    
+
     if (path_len > 0) {
         return path_buffer[0..@as(usize, @intCast(path_len))];
     }
-    
+
     return null;
 }
 
 /// Get list of all PIDs
 pub fn getAllPids(buffer: []pid_t) MachError!usize {
     const pid_count = proc_listpids(PROC_ALL_PIDS, 0, @ptrCast(buffer.ptr), @intCast(buffer.len * @sizeOf(pid_t)));
-    
+
     if (pid_count <= 0) {
         return error.ProcessListFailed;
     }
-    
+
     const actual_pid_count = @as(usize, @intCast(pid_count)) / @sizeOf(pid_t);
     return @min(actual_pid_count, buffer.len);
 }

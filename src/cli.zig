@@ -13,7 +13,7 @@ pub const Options = struct {
     top: ?usize = null,
     color: bool = true,
     breakdown: bool = false,
-    
+
     /// Validate options and return error if invalid
     pub fn validate(self: Options) !void {
         if (self.watch_interval == 0) {
@@ -29,10 +29,10 @@ pub const Options = struct {
 pub fn parseArgs(args: [][:0]u8) Options {
     var opts = Options{};
     var i: usize = 1;
-    
+
     while (i < args.len) {
         const arg = args[i];
-        
+
         if (std.mem.eql(u8, arg, "--watch") or std.mem.eql(u8, arg, "-w")) {
             opts.watch = true;
             // Check for interval
@@ -59,10 +59,10 @@ pub fn parseArgs(args: [][:0]u8) Options {
             printHelp();
             std.posix.exit(0);
         }
-        
+
         i += 1;
     }
-    
+
     return opts;
 }
 
