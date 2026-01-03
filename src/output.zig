@@ -251,7 +251,8 @@ pub fn printMemoryStats(stats: memory.MemoryStats, opts: cli.Options) !void {
 /// Print memory statistics in JSON format
 pub fn printJson(stats: memory.MemoryStats, _: cli.Options) !void {
     const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
-    var output_buf: [2048]u8 = undefined;
+    // Increased buffer size to handle large numbers safely
+    var output_buf: [4096]u8 = undefined;
     var stream = std.io.fixedBufferStream(&output_buf);
     const writer = stream.writer();
 

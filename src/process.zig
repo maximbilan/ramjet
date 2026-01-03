@@ -13,12 +13,6 @@ pub const ProcessInfo = struct {
     name_len: usize,
     resident_size: u64,
 
-    /// Compare two processes by resident size (for sorting)
-    pub fn lessThan(context: void, a: ProcessInfo, b: ProcessInfo) bool {
-        _ = context;
-        return a.resident_size < b.resident_size;
-    }
-
     /// Compare two processes by resident size (descending, for top-N)
     pub fn greaterThan(context: void, a: ProcessInfo, b: ProcessInfo) bool {
         _ = context;
