@@ -35,7 +35,7 @@ pub const Options = struct {
 };
 
 // Version constant
-pub const VERSION = "0.1.0";
+pub const VERSION = "0.1.1";
 
 /// Parse command-line arguments
 pub fn parseArgs(args: [][:0]u8) Options {
