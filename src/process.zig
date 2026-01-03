@@ -95,23 +95,9 @@ pub fn getProcessList(processes: []ProcessInfo) mach.MachError!usize {
 }
 
 /// Sort processes by resident size (descending order for top-N)
+/// Uses std.sort for O(n log n) performance instead of O(n²) selection sort
 pub fn sortProcessesByMemory(processes: []ProcessInfo) void {
-    // Use selection sort (simple, no allocations)
-    for (0..processes.len) |i| {
-        var max_idx = i;
-        var max_size = processes[i].resident_size;
-        for (i + 1..processes.len) |j| {
-            if (processes[j].resident_size > max_size) {
-                max_idx = j;
-                max_size = processes[j].resident_size;
-            }
-        }
-        if (max_idx != i) {
-            const temp = processes[i];
-            processes[i] = processes[max_idx];
-            processes[max_idx] = temp;
-        }
-    }
+    std.sort.block(ProcessInfo, processes, {}, ProcessInfo.greaterThan);
 }
 
 test "ProcessInfo greaterThan compares correctly" {

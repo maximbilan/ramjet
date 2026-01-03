@@ -248,6 +248,32 @@ pub fn printMemoryStats(stats: memory.MemoryStats, opts: cli.Options) !void {
     try stdout_file.writeAll(line6);
 }
 
+/// Print memory statistics in JSON format
+pub fn printJson(stats: memory.MemoryStats, _: cli.Options) !void {
+    const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    var output_buf: [2048]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&output_buf);
+    const writer = stream.writer();
+
+    try writer.writeAll("{\n");
+    try writer.print("  \"total\": {d},\n", .{stats.total});
+    try writer.print("  \"used\": {d},\n", .{stats.used});
+    try writer.print("  \"free\": {d},\n", .{stats.free});
+    try writer.print("  \"cached\": {d},\n", .{stats.cached});
+    try writer.print("  \"usage_percent\": {d:.2},\n", .{stats.usagePercent()});
+    try writer.print("  \"active\": {d},\n", .{stats.active});
+    try writer.print("  \"wired\": {d},\n", .{stats.wired});
+    try writer.print("  \"inactive\": {d},\n", .{stats.inactive});
+    try writer.print("  \"speculative\": {d},\n", .{stats.speculative});
+    try writer.print("  \"compressed\": {d},\n", .{stats.compressed});
+    try writer.print("  \"swap_used\": {d},\n", .{stats.swap_used});
+    try writer.print("  \"swap_total\": {d},\n", .{stats.swap_total});
+    try writer.print("  \"pressure\": \"{s}\"\n", .{stats.pressure.toString()});
+    try writer.writeAll("}\n");
+
+    try stdout_file.writeAll(stream.getWritten());
+}
+
 /// Clear screen (for watch mode)
 pub fn clearScreen() void {
     const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };

@@ -13,6 +13,7 @@ pub const Options = struct {
     top: ?usize = null,
     color: bool = true,
     breakdown: bool = false,
+    json: bool = false,
 
     /// Validate options and return error if invalid
     pub fn validate(self: Options) !void {
@@ -22,8 +23,19 @@ pub const Options = struct {
         if (self.watch_interval > 3600) {
             return error.WatchIntervalTooLarge;
         }
+        if (self.top) |count| {
+            if (count == 0) {
+                return error.InvalidTopCount;
+            }
+            if (count > 100) {
+                return error.TopCountTooLarge;
+            }
+        }
     }
 };
+
+// Version constant
+pub const VERSION = "0.1.0";
 
 /// Parse command-line arguments
 pub fn parseArgs(args: [][:0]u8) Options {
@@ -47,7 +59,15 @@ pub fn parseArgs(args: [][:0]u8) Options {
         } else if (std.mem.eql(u8, arg, "--top")) {
             if (i + 1 < args.len) {
                 if (std.fmt.parseInt(usize, args[i + 1], 10)) |count| {
-                    opts.top = count;
+                    if (count > 0 and count <= 100) {
+                        opts.top = count;
+                    } else {
+                        const stderr_file = std.fs.File{ .handle = std.posix.STDERR_FILENO };
+                        var buf: [256]u8 = undefined;
+                        if (std.fmt.bufPrint(&buf, "Warning: --top count must be between 1 and 100, got {d}\n", .{count})) |msg| {
+                            _ = stderr_file.writeAll(msg) catch {};
+                        } else |_| {}
+                    }
                     i += 1;
                 } else |_| {}
             }
@@ -55,15 +75,33 @@ pub fn parseArgs(args: [][:0]u8) Options {
             opts.color = false;
         } else if (std.mem.eql(u8, arg, "--breakdown") or std.mem.eql(u8, arg, "-b")) {
             opts.breakdown = true;
+        } else if (std.mem.eql(u8, arg, "--json")) {
+            opts.json = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
+            printVersion();
+            std.posix.exit(0);
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             printHelp();
             std.posix.exit(0);
+        } else {
+            // Warn about unknown arguments
+            const stderr_file = std.fs.File{ .handle = std.posix.STDERR_FILENO };
+            var buf: [256]u8 = undefined;
+            if (std.fmt.bufPrint(&buf, "Warning: unknown argument '{s}'\n", .{arg})) |msg| {
+                _ = stderr_file.writeAll(msg) catch {};
+            } else |_| {}
         }
 
         i += 1;
     }
 
     return opts;
+}
+
+/// Print version information
+fn printVersion() void {
+    const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    _ = stdout_file.writeAll("ramjet version " ++ VERSION ++ "\n") catch {};
 }
 
 /// Print help message
@@ -75,9 +113,11 @@ fn printHelp() void {
         \\Options:
         \\  -w, --watch [SECONDS]    Watch mode (update every N seconds, default: 2)
         \\  -c, --compact             Compact single-line output
-        \\  --top N                   Show top N processes by memory usage
+        \\  --top N                   Show top N processes by memory usage (1-100)
         \\  -b, --breakdown           Show detailed memory breakdown
+        \\  --json                     Output in JSON format
         \\  --no-color                Disable colored output
+        \\  -v, --version             Show version information
         \\  -h, --help               Show this help message
         \\
     ) catch {};

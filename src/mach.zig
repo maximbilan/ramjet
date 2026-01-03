@@ -136,9 +136,14 @@ pub const MachError = error{
     MemoryPressureFailed,
 };
 
-/// Get system page size
+// Cache page size (constant per system)
+var cached_page_size: ?c_int = null;
+
+/// Get system page size (cached)
 pub fn getPageSize() c_int {
-    return getpagesize();
+    if (cached_page_size) |size| return size;
+    cached_page_size = getpagesize();
+    return cached_page_size.?;
 }
 
 /// Get total physical memory using sysctl
