@@ -18,6 +18,20 @@ pub const ProcessInfo = struct {
         _ = context;
         return a.resident_size > b.resident_size;
     }
+
+    /// Compare two processes by PID (ascending)
+    pub fn lessThanByPid(context: void, a: ProcessInfo, b: ProcessInfo) bool {
+        _ = context;
+        return a.pid < b.pid;
+    }
+
+    /// Compare two processes by name (alphabetical)
+    pub fn lessThanByName(context: void, a: ProcessInfo, b: ProcessInfo) bool {
+        _ = context;
+        const a_name = a.name[0..a.name_len];
+        const b_name = b.name[0..b.name_len];
+        return std.mem.lessThan(u8, a_name, b_name);
+    }
 };
 
 pub const MAX_PROCESS_BUFFER: usize = 2000; // Maximum processes to collect
@@ -92,6 +106,16 @@ pub fn getProcessList(processes: []ProcessInfo) mach.MachError!usize {
 /// Uses std.sort for O(n log n) performance instead of O(n²) selection sort
 pub fn sortProcessesByMemory(processes: []ProcessInfo) void {
     std.sort.block(ProcessInfo, processes, {}, ProcessInfo.greaterThan);
+}
+
+/// Sort processes by PID (ascending)
+pub fn sortProcessesByPid(processes: []ProcessInfo) void {
+    std.sort.block(ProcessInfo, processes, {}, ProcessInfo.lessThanByPid);
+}
+
+/// Sort processes by name (alphabetical)
+pub fn sortProcessesByName(processes: []ProcessInfo) void {
+    std.sort.block(ProcessInfo, processes, {}, ProcessInfo.lessThanByName);
 }
 
 test "ProcessInfo greaterThan compares correctly" {

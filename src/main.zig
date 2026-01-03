@@ -38,15 +38,23 @@ fn signalHandler(sig: c_int) callconv(.c) void {
 
 /// Print output based on options
 fn printOutput(stats: memory.MemoryStats, opts: cli.Options) !void {
+    // Handle export first
+    if (opts.export_format) |export_fmt| {
+        try output.printExport(stats, export_fmt, opts);
+        return;
+    }
+
     if (opts.json) {
         try output.printJson(stats, opts);
     } else if (opts.compact) {
         try output.printCompact(stats, opts);
     } else {
-        try output.printMemoryStats(stats, opts);
+        if (!opts.quiet) {
+            try output.printMemoryStats(stats, opts);
+        }
     }
 
-    if (opts.breakdown and !opts.json) {
+    if (opts.breakdown and !opts.json and !opts.quiet) {
         try output.printBreakdown(stats, opts);
     }
 

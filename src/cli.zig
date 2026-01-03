@@ -5,6 +5,19 @@
 
 const std = @import("std");
 
+/// Sort mode for process listing
+pub const SortMode = enum {
+    memory, // Sort by memory (descending)
+    pid,    // Sort by PID (ascending)
+    name,   // Sort by name (alphabetical)
+};
+
+/// Export format
+pub const ExportFormat = enum {
+    json,
+    csv,
+};
+
 /// Command-line options
 pub const Options = struct {
     watch: bool = false,
@@ -16,6 +29,10 @@ pub const Options = struct {
     json: bool = false,
     interactive: bool = false,
     detect_leaks: bool = false,
+    min_memory: ?u64 = null,      // Minimum memory in bytes to show process
+    sort: SortMode = .memory,      // Sort mode for processes
+    quiet: bool = false,           // Quiet mode (suppress non-essential output)
+    export_format: ?ExportFormat = null,  // Export format (JSON/CSV)
 
     /// Validate options and return error if invalid
     pub fn validate(self: Options) !void {
@@ -129,6 +146,37 @@ pub fn parseArgs(args: [][:0]u8) Options {
             opts.interactive = true;
         } else if (std.mem.eql(u8, arg, "--detect-leaks")) {
             opts.detect_leaks = true;
+        } else if (std.mem.eql(u8, arg, "--min-memory")) {
+            if (i + 1 < args.len) {
+                if (std.fmt.parseInt(u64, args[i + 1], 10)) |min_bytes| {
+                    opts.min_memory = min_bytes;
+                    i += 1;
+                } else |_| {}
+            }
+        } else if (std.mem.eql(u8, arg, "--sort")) {
+            if (i + 1 < args.len) {
+                const sort_str = args[i + 1];
+                if (std.mem.eql(u8, sort_str, "memory")) {
+                    opts.sort = .memory;
+                } else if (std.mem.eql(u8, sort_str, "pid")) {
+                    opts.sort = .pid;
+                } else if (std.mem.eql(u8, sort_str, "name")) {
+                    opts.sort = .name;
+                }
+                i += 1;
+            }
+        } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
+            opts.quiet = true;
+        } else if (std.mem.eql(u8, arg, "--export")) {
+            if (i + 1 < args.len) {
+                const format_str = args[i + 1];
+                if (std.mem.eql(u8, format_str, "json")) {
+                    opts.export_format = .json;
+                } else if (std.mem.eql(u8, format_str, "csv")) {
+                    opts.export_format = .csv;
+                }
+                i += 1;
+            }
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
             printVersion();
             std.posix.exit(0);
@@ -167,15 +215,40 @@ fn printHelp() void {
         \\
         \\Options:
         \\  -w, --watch [SECONDS]    Watch mode (update every N seconds, default: 2)
+        \\                            Example: ramjet --watch 5
         \\  -c, --compact             Compact single-line output
+        \\                            Example: ramjet --compact
         \\  --top N                   Show top N processes by memory usage (1-100)
+        \\                            Example: ramjet --top 10
+        \\  --min-memory BYTES        Filter processes with memory >= BYTES
+        \\                            Example: ramjet --top 20 --min-memory 104857600 (100MB)
+        \\  --sort MODE               Sort processes: memory, pid, or name
+        \\                            Example: ramjet --top 10 --sort name
         \\  -b, --breakdown           Show detailed memory breakdown
+        \\                            Example: ramjet --breakdown
         \\  --json                     Output in JSON format
+        \\                            Example: ramjet --json
+        \\  --export FORMAT            Export to JSON or CSV file
+        \\                            Example: ramjet --export json > output.json
+        \\                            Example: ramjet --export csv > output.csv
         \\  -i, --interactive          Interactive TUI mode
+        \\                            Example: ramjet --interactive
         \\  --detect-leaks             Detect memory leaks (requires watch/interactive mode)
+        \\                            Example: ramjet --watch --detect-leaks
+        \\  -q, --quiet                Quiet mode (suppress non-essential output)
+        \\                            Example: ramjet --quiet --json
         \\  --no-color                Disable colored output
+        \\                            Example: ramjet --no-color
         \\  -v, --version             Show version information
-        \\  -h, --help               Show this help message
+        \\  -h, --help                Show this help message
+        \\
+        \\Examples:
+        \\  ramjet                                    # Basic memory stats
+        \\  ramjet --watch 3 --top 5                  # Watch mode, top 5 processes every 3s
+        \\  ramjet --top 20 --min-memory 52428800     # Top 20 processes using >= 50MB
+        \\  ramjet --top 10 --sort name               # Top 10 processes sorted by name
+        \\  ramjet --json --quiet > stats.json        # JSON output, quiet mode
+        \\  ramjet --export csv > processes.csv       # Export to CSV
         \\
     ) catch {};
 }

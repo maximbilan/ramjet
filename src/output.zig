@@ -109,7 +109,7 @@ pub fn printBreakdown(stats: memory.MemoryStats, opts: cli.Options) !void {
 /// Collects all accessible processes, sorts them by memory usage, and displays the top N.
 pub fn printTopProcesses(count: usize, opts: cli.Options) !void {
     var processes: [process.MAX_PROCESS_BUFFER]process.ProcessInfo = undefined;
-    const actual_count = try process.getProcessList(&processes);
+    var actual_count = try process.getProcessList(&processes);
 
     if (actual_count == 0) {
         const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
@@ -117,8 +117,26 @@ pub fn printTopProcesses(count: usize, opts: cli.Options) !void {
         return;
     }
 
-    // Sort by resident size (descending)
-    process.sortProcessesByMemory(processes[0..actual_count]);
+    // Filter by minimum memory if specified
+    if (opts.min_memory) |min_mem| {
+        var filtered_count: usize = 0;
+        for (0..actual_count) |i| {
+            if (processes[i].resident_size >= min_mem) {
+                if (filtered_count != i) {
+                    processes[filtered_count] = processes[i];
+                }
+                filtered_count += 1;
+            }
+        }
+        actual_count = filtered_count;
+    }
+
+    // Sort according to sort mode
+    switch (opts.sort) {
+        .memory => process.sortProcessesByMemory(processes[0..actual_count]),
+        .pid => process.sortProcessesByPid(processes[0..actual_count]),
+        .name => process.sortProcessesByName(processes[0..actual_count]),
+    }
 
     // Only display the top 'count' processes
     const display_count = @min(count, actual_count);
@@ -134,7 +152,13 @@ pub fn printTopProcesses(count: usize, opts: cli.Options) !void {
     // Empty line before section
     try stdout_file.writeAll("\n");
 
-    const header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes by Memory:{s}\n", .{ bold, display_count, reset });
+    // Show process count if different from display count
+    var header: []const u8 = undefined;
+    if (display_count < actual_count) {
+        header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes (showing {d} of {d}):{s}\n", .{ bold, count, display_count, actual_count, reset });
+    } else {
+        header = try std.fmt.bufPrint(&output_buf, "{s}Top {d} Processes:{s}\n", .{ bold, display_count, reset });
+    }
     try stdout_file.writeAll(header);
 
     // Find the maximum width of memory strings for alignment
@@ -273,6 +297,121 @@ pub fn printJson(stats: memory.MemoryStats, _: cli.Options) !void {
     try writer.writeAll("}\n");
 
     try stdout_file.writeAll(stream.getWritten());
+}
+
+/// Export memory stats and processes to JSON or CSV
+pub fn printExport(stats: memory.MemoryStats, export_fmt: cli.ExportFormat, opts: cli.Options) !void {
+    const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    
+    if (export_fmt == .json) {
+        // Export JSON with processes if --top is specified
+        var output_buf: [8192]u8 = undefined;
+        var stream = std.io.fixedBufferStream(&output_buf);
+        const writer = stream.writer();
+
+        try writer.writeAll("{\n");
+        try writer.print("  \"total\": {d},\n", .{stats.total});
+        try writer.print("  \"used\": {d},\n", .{stats.used});
+        try writer.print("  \"free\": {d},\n", .{stats.free});
+        try writer.print("  \"cached\": {d},\n", .{stats.cached});
+        try writer.print("  \"usage_percent\": {d:.2},\n", .{stats.usagePercent()});
+        try writer.print("  \"active\": {d},\n", .{stats.active});
+        try writer.print("  \"wired\": {d},\n", .{stats.wired});
+        try writer.print("  \"inactive\": {d},\n", .{stats.inactive});
+        try writer.print("  \"speculative\": {d},\n", .{stats.speculative});
+        try writer.print("  \"compressed\": {d},\n", .{stats.compressed});
+        try writer.print("  \"swap_used\": {d},\n", .{stats.swap_used});
+        try writer.print("  \"swap_total\": {d},\n", .{stats.swap_total});
+        try writer.print("  \"pressure\": \"{s}\"", .{stats.pressure.toString()});
+
+        if (opts.top) |count| {
+            var processes: [process.MAX_PROCESS_BUFFER]process.ProcessInfo = undefined;
+            const process_count = process.getProcessList(&processes) catch 0;
+            
+            // Filter and sort
+            var filtered_count = process_count;
+            if (opts.min_memory) |min_mem| {
+                var filtered: usize = 0;
+                for (0..process_count) |i| {
+                    if (processes[i].resident_size >= min_mem) {
+                        if (filtered != i) {
+                            processes[filtered] = processes[i];
+                        }
+                        filtered += 1;
+                    }
+                }
+                filtered_count = filtered;
+            }
+
+            switch (opts.sort) {
+                .memory => process.sortProcessesByMemory(processes[0..filtered_count]),
+                .pid => process.sortProcessesByPid(processes[0..filtered_count]),
+                .name => process.sortProcessesByName(processes[0..filtered_count]),
+            }
+
+            const display_count = @min(count, filtered_count);
+            try writer.writeAll(",\n  \"processes\": [\n");
+            for (0..display_count) |i| {
+                const proc = processes[i];
+                const name = proc.name[0..proc.name_len];
+                try writer.print("    {{\"pid\": {d}, \"name\": \"{s}\", \"memory\": {d}}}", .{ proc.pid, name, proc.resident_size });
+                if (i < display_count - 1) {
+                    try writer.writeAll(",");
+                }
+                try writer.writeAll("\n");
+            }
+            try writer.writeAll("  ]");
+        }
+
+        try writer.writeAll("\n}\n");
+        try stdout_file.writeAll(stream.getWritten());
+    } else if (export_fmt == .csv) {
+        // Export CSV
+        try stdout_file.writeAll("total,used,free,cached,usage_percent,active,wired,inactive,speculative,compressed,swap_used,swap_total,pressure\n");
+        var csv_buf: [512]u8 = undefined;
+        const csv_line = try std.fmt.bufPrint(
+            &csv_buf,
+            "{d},{d},{d},{d},{d:.2},{d},{d},{d},{d},{d},{d},{d},\"{s}\"\n",
+            .{ stats.total, stats.used, stats.free, stats.cached, stats.usagePercent(), stats.active, stats.wired, stats.inactive, stats.speculative, stats.compressed, stats.swap_used, stats.swap_total, stats.pressure.toString() },
+        );
+        try stdout_file.writeAll(csv_line);
+
+        if (opts.top) |count| {
+            try stdout_file.writeAll("\npid,name,memory\n");
+            var processes: [process.MAX_PROCESS_BUFFER]process.ProcessInfo = undefined;
+            const process_count = process.getProcessList(&processes) catch 0;
+            
+            // Filter and sort
+            var filtered_count = process_count;
+            if (opts.min_memory) |min_mem| {
+                var filtered: usize = 0;
+                for (0..process_count) |i| {
+                    if (processes[i].resident_size >= min_mem) {
+                        if (filtered != i) {
+                            processes[filtered] = processes[i];
+                        }
+                        filtered += 1;
+                    }
+                }
+                filtered_count = filtered;
+            }
+
+            switch (opts.sort) {
+                .memory => process.sortProcessesByMemory(processes[0..filtered_count]),
+                .pid => process.sortProcessesByPid(processes[0..filtered_count]),
+                .name => process.sortProcessesByName(processes[0..filtered_count]),
+            }
+
+            const display_count = @min(count, filtered_count);
+            for (0..display_count) |i| {
+                const proc = processes[i];
+                const name = proc.name[0..proc.name_len];
+                var proc_csv_buf: [256]u8 = undefined;
+                const proc_csv = try std.fmt.bufPrint(&proc_csv_buf, "{d},\"{s}\",{d}\n", .{ proc.pid, name, proc.resident_size });
+                try stdout_file.writeAll(proc_csv);
+            }
+        }
+    }
 }
 
 /// Clear screen (for watch mode)
