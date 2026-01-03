@@ -18,6 +18,7 @@ pub const TUIState = struct {
     scroll_offset: usize = 0,
     sort_by: SortMode = .memory,
     show_leaks: bool = false,
+    show_help: bool = false,
     process_count: usize = 20,
 };
 
@@ -119,14 +120,14 @@ pub fn getTerminalSize() struct { width: u16, height: u16 } {
 }
 
 /// Read a single character from stdin (non-blocking)
-/// Uses a simple approach - in practice, the 100ms sleep in the main loop
+/// Uses a simple approach - in practice, the 200ms sleep in the main loop
 /// makes this effectively non-blocking for the TUI
 pub fn readChar() ?u8 {
     var buf: [1]u8 = undefined;
     const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
 
-    // Try to read - this may block briefly, but the main loop has delays
-    // For a better implementation, we'd use select/poll, but this works for now
+    // Try to read - in raw mode with VMIN=0 and VTIME=0, this should return immediately
+    // if no data is available. However, if it blocks, the main loop delay helps.
     const bytes_read = stdin_file.read(&buf) catch return null;
     if (bytes_read == 0) return null;
     return buf[0];
@@ -230,6 +231,12 @@ pub fn render(
     if (state.show_leaks and leak_count > 0) {
         var leak_buf: [512]u8 = undefined;
         try renderLeaks(stdout_file, leaks, leak_count, opts, &leak_buf);
+    }
+
+    // Help screen (if enabled)
+    if (state.show_help) {
+        var help_buf: [512]u8 = undefined;
+        try renderHelp(stdout_file, opts, &help_buf);
     }
 
     // Process list header
@@ -379,6 +386,81 @@ fn renderFooter(stdout_file: std.fs.File, buf: []u8) !void {
     try stdout_file.writeAll(footer);
 }
 
+/// Render help screen
+fn renderHelp(stdout_file: std.fs.File, opts: cli.Options, buf: []u8) !void {
+    const reset = if (opts.color) colors.Color.RESET else "";
+    const bold = if (opts.color) colors.Color.BOLD else "";
+    const cyan = if (opts.color) colors.Color.CYAN else "";
+
+    const help_text = try std.fmt.bufPrint(
+        buf,
+        "\n{s}Keyboard Controls:{s}\n",
+        .{ bold, reset },
+    );
+    try stdout_file.writeAll(help_text);
+
+    var help_line_buf: [256]u8 = undefined;
+
+    // Line 1: Arrow keys
+    const line1 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}↑{s} / {s}↓{s}     Navigate up/down through process list\n",
+        .{ cyan, reset, cyan, reset },
+    );
+    try stdout_file.writeAll(line1);
+
+    // Line 2: Sort
+    const line2 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}s{s}              Cycle sort mode (memory -> PID -> name)\n",
+        .{ cyan, reset },
+    );
+    try stdout_file.writeAll(line2);
+
+    // Line 3: Toggle leaks
+    const line3 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}l{s}              Toggle leak detection display\n",
+        .{ cyan, reset },
+    );
+    try stdout_file.writeAll(line3);
+
+    // Line 4: Refresh
+    const line4 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}r{s}              Refresh data immediately\n",
+        .{ cyan, reset },
+    );
+    try stdout_file.writeAll(line4);
+
+    // Line 5: Help
+    const line5 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}h{s}              Toggle this help screen\n",
+        .{ cyan, reset },
+    );
+    try stdout_file.writeAll(line5);
+
+    // Line 6: Quit
+    const line6 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "  {s}q{s} / {s}ESC{s}     Quit and return to terminal\n",
+        .{ cyan, reset, cyan, reset },
+    );
+    try stdout_file.writeAll(line6);
+
+    // Line 7: Empty
+    try stdout_file.writeAll("\n");
+
+    // Line 8: Note
+    const line8 = try std.fmt.bufPrint(
+        &help_line_buf,
+        "Note: Keys are detected immediately - no need to press Enter!\n",
+        .{},
+    );
+    try stdout_file.writeAll(line8);
+}
+
 /// Run interactive TUI mode
 pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.atomic.Value(bool)) !void {
     var state = TUIState{};
@@ -423,8 +505,16 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
             leak_count = detector.detectLeaks(&leak_buffer, &processes_buffer);
         }
 
-        // Render UI
-        try render(stats, &processes_buffer, process_count, &state, &leak_buffer, leak_count, opts);
+        // Render UI (only if help is not showing, or show both)
+        if (!state.show_help) {
+            try render(stats, &processes_buffer, process_count, &state, &leak_buffer, leak_count, opts);
+        } else {
+            // Show help screen
+            const stdout_file = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+            try stdout_file.writeAll(CLEAR_SCREEN);
+            var help_buf: [512]u8 = undefined;
+            try renderHelp(stdout_file, opts, &help_buf);
+        }
 
         // Handle input (non-blocking)
         if (readKey()) |key| {
@@ -454,7 +544,7 @@ pub fn runInteractive(opts: cli.Options, detect_leaks: bool, should_exit: *std.a
                     // Force refresh by continuing loop
                 },
                 .help => {
-                    // Could show help screen
+                    state.show_help = !state.show_help;
                 },
                 else => {},
             }
